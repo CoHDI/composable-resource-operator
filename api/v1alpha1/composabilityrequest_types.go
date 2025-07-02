@@ -1,18 +1,18 @@
-/**
- * (C) Copyright IBM Corp. 2024.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+/*
+Copyright 2025.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 
 package v1alpha1
 
@@ -32,38 +32,55 @@ const (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-type ScalarResourceDetails struct {
-	Size  int64  `json:"size,omitempty"`
-	Model string `json:"model,omitempty"`
-}
-
-// FrameworkResources define resources as they are defined inside k8s
-type FrameworkResources struct {
-	MilliCPU         int64                            `json:"milli_cpu,omitempty"`
-	Memory           int64                            `json:"memory,omitempty"`
-	EphemeralStorage int64                            `json:"ephemeral_storage,omitempty"`
-	AllowedPodNumber int                              `json:"allowed_pod_number,omitempty"`
-	ScalarResources  map[string]ScalarResourceDetails `json:"scalar_resources,omitempty"`
-}
-
 // ComposabilityRequestSpec defines the desired state of ComposabilityRequest
 type ComposabilityRequestSpec struct {
-	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
+	Resource ScalarResourceDetails `json:"resource"`
+}
 
-	TargetNode string             `json:"targetNode"`
-	Resources  FrameworkResources `json:"resources"`
+type ScalarResourceDetails struct {
+	// +kubebuilder:validation:Enum="gpu";"cxlmemory"
+	Type  string `json:"type"`
+	Model string `json:"model"`
+	// +kubebuilder:validation:Minimum=0
+	Size        int64 `json:"size"`
+	ForceDetach bool  `json:"force_detach,omitempty"`
+	// +kubebuilder:validation:Enum="samenode";"differentnode"
+	// +kubebuilder:default=samenode
+	AllocationPolicy string    `json:"allocation_policy,omitempty"`
+	TargetNode       string    `json:"target_node,omitempty"`
+	OtherSpec        *NodeSpec `json:"other_spec,omitempty"`
+}
+
+type NodeSpec struct {
+	// +kubebuilder:validation:Minimum=0
+	MilliCPU int64 `json:"milli_cpu,omitempty"`
+	// +kubebuilder:validation:Minimum=0
+	Memory int64 `json:"memory,omitempty"`
+	// +kubebuilder:validation:Minimum=0
+	EphemeralStorage int64 `json:"ephemeral_storage,omitempty"`
+	// +kubebuilder:validation:Minimum=0
+	AllowedPodNumber int64 `json:"allowed_pod_number,omitempty"`
 }
 
 // ComposabilityRequestStatus defines the observed state of ComposabilityRequest
 type ComposabilityRequestStatus struct {
-	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
-	// Important: Run "make" to regenerate code after modifying this file
-	State string `json:"state"`
+	State          string                          `json:"state"`
+	Error          string                          `json:"error,omitempty"`
+	Resources      map[string]ScalarResourceStatus `json:"resources,omitempty"`
+	ScalarResource ScalarResourceDetails           `json:"scalarResource,omitempty"`
 }
 
-//+kubebuilder:object:root=true
-//+kubebuilder:subresource:status
+type ScalarResourceStatus struct {
+	State       string `json:"state"`
+	DeviceID    string `json:"device_id,omitempty"`
+	CDIDeviceID string `json:"cdi_device_id,omitempty"`
+	NodeName    string `json:"node_name,omitempty"`
+	Error       string `json:"error,omitempty"`
+}
+
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:scope=Cluster
 
 // ComposabilityRequest is the Schema for the composabilityrequests API
 type ComposabilityRequest struct {
@@ -74,7 +91,7 @@ type ComposabilityRequest struct {
 	Status ComposabilityRequestStatus `json:"status,omitempty"`
 }
 
-//+kubebuilder:object:root=true
+// +kubebuilder:object:root=true
 
 // ComposabilityRequestList contains a list of ComposabilityRequest
 type ComposabilityRequestList struct {
