@@ -59,7 +59,7 @@ func DrainGPU(ctx context.Context, clientset *kubernetes.Clientset, restConfig *
 		pciBusID := strings.TrimSpace(parts[2])
 
 		if gpuUUID == targetGPUUUID {
-			targetGPUBusID = pciBusID
+			targetGPUBusID = strings.TrimPrefix(pciBusID, "0000")
 			targetIndex = index
 			break
 		}
@@ -134,14 +134,13 @@ func DrainGPU(ctx context.Context, clientset *kubernetes.Clientset, restConfig *
 		if err != nil {
 			return err
 		}
-		commands := []struct {
+		commandInDRA := []struct {
 			cmd  []string
 			desc string
 		}{
-			{[]string{"rm", "/dev/nvidia" + targetIndex}, "disable persistence mode"},
-			{[]string{"rm", "/run/nvidia/driver/dev/nvidia" + targetIndex}, "set maintenance mode"},
+			{[]string{"rm", "/dev/nvidia" + targetIndex}, "remove file /dev/nvidiaX"},
 		}
-		for _, step := range commands {
+		for _, step := range commandInDRA {
 			_, stderr, execErr := execCommandInPod(
 				ctx,
 				clientset,
@@ -149,6 +148,27 @@ func DrainGPU(ctx context.Context, clientset *kubernetes.Clientset, restConfig *
 				draPod.Namespace,
 				draPod.Name,
 				draPod.Spec.Containers[0].Name,
+				step.cmd,
+			)
+			if execErr != nil || stderr != "" {
+				return fmt.Errorf("delete device file command '%s' failed: '%v', stderr: '%s'", step.desc, execErr, stderr)
+			}
+		}
+
+		commandInNvidia := []struct {
+			cmd  []string
+			desc string
+		}{
+			{[]string{"rm", "/run/nvidia/driver/dev/nvidia" + targetIndex}, "remve file /run/nvidia/driver/dev/nvidiaX"},
+		}
+		for _, step := range commandInNvidia {
+			_, stderr, execErr := execCommandInPod(
+				ctx,
+				clientset,
+				restConfig,
+				nvidiaPod.Namespace,
+				nvidiaPod.Name,
+				nvidiaPod.Spec.Containers[0].Name,
 				step.cmd,
 			)
 			if execErr != nil || stderr != "" {
