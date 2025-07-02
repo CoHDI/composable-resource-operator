@@ -300,20 +300,12 @@ func (f *FTIClient) CheckResource(instance *v1alpha1.ComposableResource) error {
 				} else {
 					return fmt.Errorf("the target gpu '%s' has unknown state", instance.Status.DeviceID)
 				}
-			} else {
-				err := fmt.Errorf("the target device '%s' cannot be found in CDI system", instance.Status.DeviceID)
-				clientLog.Error(err, "failed to search device", "ComposableResource", instance.Name)
-				return err
 			}
 		}
-
-		err := fmt.Errorf("the target model '%s' cannot be found in CDI system", instance.Spec.Model)
-		clientLog.Error(err, "failed to search model", "ComposableResource", instance.Name)
-		return err
 	}
 
-	err = fmt.Errorf("the target type '%s' cannot be found in CDI system", instance.Spec.Type)
-	clientLog.Error(err, "failed to search type", "ComposableResource", instance.Name)
+	err = fmt.Errorf("the target device '%s' cannot be found in CDI system", instance.Status.DeviceID)
+	clientLog.Error(err, "failed to search device", "ComposableResource", instance.Name)
 	return err
 }
 

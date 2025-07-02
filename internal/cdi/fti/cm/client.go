@@ -278,19 +278,11 @@ func (f *FTIClient) CheckResource(instance *v1alpha1.ComposableResource) error {
 				// The gpu device was found and did not report an error, so the check was successful.
 				return nil
 			}
-			// There is a resourceSpec that meets the condition, but the passed ComposableResource cannot be found under it.
-			err := fmt.Errorf("the target device '%s' cannot be found in CDI system", instance.Status.DeviceID)
-			clientLog.Error(err, "failed to search device", "ComposableResource", instance.Name)
-			return err
 		}
-		// There is a resourceSpec that meets the type, but the passed model of ComposableResource is not found under it.
-		err := fmt.Errorf("the target model '%s' cannot be found in CDI system", instance.Spec.Model)
-		clientLog.Error(err, "failed to search model", "ComposableResource", instance.Name)
-		return err
 	}
-	// No resourceSpec that is of type GPU was found.
-	err = fmt.Errorf("the target type '%s' cannot be found in CDI system", instance.Spec.Type)
-	clientLog.Error(err, "failed to search type", "ComposableResource", instance.Name)
+
+	err = fmt.Errorf("the target device '%s' cannot be found in CDI system", instance.Status.DeviceID)
+	clientLog.Error(err, "failed to search device", "ComposableResource", instance.Name)
 	return err
 }
 
