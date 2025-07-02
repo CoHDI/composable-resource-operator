@@ -1,29 +1,15 @@
-/**
- * (C) Copyright IBM Corp. 2024.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 package sunfish
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/IBM/composable-resource-operator/api/v1alpha1"
 	"net/http"
 	"os"
+
 	ctrl "sigs.k8s.io/controller-runtime"
+
+	"github.com/IBM/composable-resource-operator/api/v1alpha1"
 )
 
 var (
@@ -64,7 +50,6 @@ type SunfishClient struct {
 }
 
 func NewSunfishClient() *SunfishClient {
-
 	endpoint := "composition-service.cro-system.svc.cluster.local:5060"
 	if ep := os.Getenv("SUNFISH_ENDPOINT"); ep != "" {
 		endpoint = ep
@@ -73,43 +58,44 @@ func NewSunfishClient() *SunfishClient {
 	return &SunfishClient{compositionServiceEndpoint: endpoint}
 }
 
-func (s *SunfishClient) sendPatchRequest(cr CompositionRequest) error {
+// TODO: Discuss with the community and change the returned deviceid according to the actual situation of sunfish.
+func (s *SunfishClient) sendPatchRequest(cr CompositionRequest) (string, string, error) {
 	crJson, _ := json.Marshal(cr)
 	setupLog.Info("requesting resources attachment", "json_request", string(crJson))
 
 	bodyReader := bytes.NewReader(crJson)
 
-	//req, err := http.NewRequest("PATCH", "http://127.0.0.1:5060/redfish/v1/Systems/System", bodyReader)
 	req, err := http.NewRequest("PATCH", "http://"+s.compositionServiceEndpoint+"/redfish/v1/Systems/System", bodyReader)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{}
 	response, err := client.Do(req)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 
 	defer response.Body.Close()
 
 	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("http returned code %d", response.StatusCode)
+		return "", "", fmt.Errorf("http returned code %d", response.StatusCode)
 	}
 
-	return nil
+	return "", "", nil
 }
 
-func (s *SunfishClient) AddResource(instance *v1alpha1.ComposabilityRequest) error {
+func (s *SunfishClient) AddResource(instance *v1alpha1.ComposableResource) (string, string, error) {
 
 	pr := ProcessorRequest{}
 
-	switch instance.Spec.Resources.ScalarResources["gpu"].Model {
+	switch instance.Spec.Model {
 	case V100, A10080G, A10040G:
-		pr.Model = instance.Spec.Resources.ScalarResources["gpu"].Model
+		pr.Model = instance.Spec.Model
 		pr.ProcType = TypeGpu
-		pr.RequestCount = instance.Spec.Resources.ScalarResources["gpu"].Size
+		// TODO: need to fix
+		pr.RequestCount = 1
 	}
 
 	prs := Processors{Members: []ProcessorRequest{pr}}
@@ -117,16 +103,16 @@ func (s *SunfishClient) AddResource(instance *v1alpha1.ComposabilityRequest) err
 	cr := CompositionRequest{Name: instance.Spec.TargetNode, Procs: prs}
 
 	return s.sendPatchRequest(cr)
-
 }
 
-func (s *SunfishClient) RemoveResource(instance *v1alpha1.ComposabilityRequest) error {
+func (s *SunfishClient) RemoveResource(instance *v1alpha1.ComposableResource) error {
 
 	pr := ProcessorRequest{}
-	switch instance.Spec.Resources.ScalarResources["gpu"].Model {
+	switch instance.Spec.Model {
 	case V100, A10080G, A10040G:
-		pr.Model = instance.Spec.Resources.ScalarResources["gpu"].Model
+		pr.Model = instance.Spec.Model
 		pr.ProcType = TypeGpu
+		// TODO: need to fix
 		pr.RequestCount = 0
 	}
 
@@ -134,6 +120,10 @@ func (s *SunfishClient) RemoveResource(instance *v1alpha1.ComposabilityRequest) 
 
 	cr := CompositionRequest{Name: instance.Spec.TargetNode, Procs: prs}
 
-	return s.sendPatchRequest(cr)
+	_, _, err := s.sendPatchRequest(cr)
+	return err
+}
 
+func (s *SunfishClient) CheckResource(instance *v1alpha1.ComposableResource) error {
+	return nil
 }

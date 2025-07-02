@@ -1,24 +1,16 @@
-/**
- * (C) Copyright IBM Corp. 2024.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 package cdi
 
-import "github.com/IBM/composable-resource-operator/api/v1alpha1"
+import (
+	"errors"
+
+	"github.com/IBM/composable-resource-operator/api/v1alpha1"
+)
 
 type CdiProvider interface {
-	AddResource(instance *v1alpha1.ComposabilityRequest) error
-	RemoveResource(instance *v1alpha1.ComposabilityRequest) error
+	AddResource(instance *v1alpha1.ComposableResource) (deviceID, CDIDeviceID string, err error)
+	RemoveResource(instance *v1alpha1.ComposableResource) error
+	CheckResource(instance *v1alpha1.ComposableResource) error
 }
+
+var ErrWaitingDeviceAttaching = errors.New("device is attaching to cluster")
+var ErrWaitingDeviceDetaching = errors.New("device is detaching to cluster")
