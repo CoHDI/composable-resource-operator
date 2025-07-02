@@ -1,23 +1,27 @@
-# permissions for end users to view composabilityrequests.
+# permissions for end users to edit composableresources.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   labels:
     app.kubernetes.io/name: composable-resource-operator
     app.kubernetes.io/managed-by: kustomize
-  name: composabilityrequest-viewer-role
+  name: composableresource-editor-role
 rules:
 - apiGroups:
   - cro.hpsys.ibm.ie.com
   resources:
-  - composabilityrequests
+  - composableresources
   verbs:
+  - create
+  - delete
   - get
   - list
+  - patch
+  - update
   - watch
 - apiGroups:
   - cro.hpsys.ibm.ie.com
   resources:
-  - composabilityrequests/status
+  - composableresources/status
   verbs:
   - get

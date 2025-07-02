@@ -8,24 +8,52 @@ rules:
   - ""
   resources:
   - nodes
+  - pods
   verbs:
   - get
-  - patch
-  - update
+  - list
+  - watch
 - apiGroups:
   - ""
   resources:
-  - pods
+  - nodes/status
+  - pods/status
   verbs:
-  - delete
+  - get
+- apiGroups:
+  - ""
+  resources:
+  - pods/exec
+  verbs:
+  - create
+- apiGroups:
+  - ""
+  resourceNames:
+  - credentials
+  resources:
+  - secrets
+  verbs:
+  - get
+- apiGroups:
+  - apps
+  resources:
+  - daemonsets
+  verbs:
   - get
   - list
-  - patch
   - update
+  - watch
+- apiGroups:
+  - apps
+  resources:
+  - daemonsets/status
+  verbs:
+  - get
 - apiGroups:
   - cro.hpsys.ibm.ie.com
   resources:
   - composabilityrequests
+  - composableresources
   verbs:
   - create
   - delete
@@ -38,12 +66,64 @@ rules:
   - cro.hpsys.ibm.ie.com
   resources:
   - composabilityrequests/finalizers
+  - composableresources/finalizers
   verbs:
   - update
 - apiGroups:
   - cro.hpsys.ibm.ie.com
   resources:
   - composabilityrequests/status
+  - composableresources/status
+  verbs:
+  - get
+  - patch
+  - update
+- apiGroups:
+  - metal3.io
+  resources:
+  - baremetalhosts
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - metal3.io
+  resources:
+  - baremetalhosts/status
+  verbs:
+  - get
+- apiGroups:
+  - resource.k8s.io
+  resources:
+  - devicetaintrules
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - resource.k8s.io
+  resources:
+  - devicetaintrules/status
+  verbs:
+  - get
+- apiGroups:
+  - resource.k8s.io
+  resources:
+  - resourceslices
+  verbs:
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - resource.k8s.io
+  resources:
+  - resourceslices/status
   verbs:
   - get
   - patch

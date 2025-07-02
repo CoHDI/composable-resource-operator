@@ -1,0 +1,26 @@
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: validating-webhook-configuration
+webhooks:
+- admissionReviewVersions:
+  - v1
+  clientConfig:
+    service:
+      name: webhook-service
+      namespace: system
+      path: /validate-cro-hpsys-ibm-ie-com-v1alpha1-composabilityrequest
+  failurePolicy: Fail
+  name: vcomposabilityrequest.kb.io
+  rules:
+  - apiGroups:
+    - cro.hpsys.ibm.ie.com
+    apiVersions:
+    - v1alpha1
+    operations:
+    - CREATE
+    - UPDATE
+    resources:
+    - composabilityrequests
+  sideEffects: None

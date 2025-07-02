@@ -1,7 +1,2 @@
 resources:
 - manager.yaml
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-images:
-- name: controller
-  newName: docker-eu-public.artifactory.swg-devops.com/res-drl-hpc-docker-local/composability/cro
