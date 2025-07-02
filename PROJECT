@@ -20,4 +20,16 @@ resources:
   kind: ComposabilityRequest
   path: github.com/IBM/composable-resource-operator/api/v1alpha1
   version: v1alpha1
+  webhooks:
+    validation: true
+    webhookVersion: v1
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: hpsys.ibm.ie.com
+  group: cro
+  kind: ComposableResource
+  path: github.com/IBM/composable-resource-operator/api/v1alpha1
+  version: v1alpha1
 version: "3"
