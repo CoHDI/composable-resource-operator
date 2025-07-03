@@ -124,6 +124,9 @@ func DrainGPU(ctx context.Context, clientset *kubernetes.Clientset, restConfig *
 			step.cmd,
 		)
 		if execErr != nil || stderr != "" {
+			if step.desc == "reset GPU" {
+				continue
+			}
 			return fmt.Errorf("deatch command '%s' failed: '%v', stderr: '%s'", step.desc, execErr, stderr)
 		}
 	}
