@@ -69,6 +69,31 @@ func DrainGPU(ctx context.Context, clientset *kubernetes.Clientset, restConfig *
 		return nil
 	}
 
+	// Detach with nvidia-smi command. Execute in nvidia-driver-daemonset Pod.
+	disableCommand := []struct {
+		cmd  []string
+		desc string
+	}{
+		{[]string{"nvidia-smi", "-i", targetGPUUUID, "-pm", "0"}, "disable persistence mode"},
+	}
+	for _, step := range disableCommand {
+		_, stderr, execErr := execCommandInPod(
+			ctx,
+			clientset,
+			restConfig,
+			nvidiaPod.Namespace,
+			nvidiaPod.Name,
+			nvidiaPod.Spec.Containers[0].Name,
+			step.cmd,
+		)
+		if execErr != nil || stderr != "" {
+			if step.desc == "reset GPU" {
+				continue
+			}
+			return fmt.Errorf("deatch command '%s' failed: '%v', stderr: '%s'", step.desc, execErr, stderr)
+		}
+	}
+
 	// Check that /dev/nvidiaX is not open.
 	var checkShell = `
         TARGET_FILE="/dev/nvidia` + targetIndex + `";
@@ -104,35 +129,29 @@ func DrainGPU(ctx context.Context, clientset *kubernetes.Clientset, restConfig *
 		return fmt.Errorf("check /dev/nvidiaX command failed: there is a process %s occupied the nvidiaX file", checkStdout)
 	}
 
-	// Detach with nvidia-smi command. Execute in nvidia-driver-daemonset Pod.
-	detachCommands := []struct {
-		cmd  []string
-		desc string
-	}{
-		{[]string{"nvidia-smi", "-i", targetGPUUUID, "-pm", "0"}, "disable persistence mode"},
-		{[]string{"nvidia-smi", "drain", "-p", targetGPUBusID, "-m", "1"}, "set maintenance mode"},
-		{[]string{"nvidia-smi", "drain", "-p", targetGPUBusID, "-r"}, "reset GPU"},
-	}
-	for _, step := range detachCommands {
-		_, stderr, execErr := execCommandInPod(
-			ctx,
-			clientset,
-			restConfig,
-			nvidiaPod.Namespace,
-			nvidiaPod.Name,
-			nvidiaPod.Spec.Containers[0].Name,
-			step.cmd,
-		)
-		if execErr != nil || stderr != "" {
-			if step.desc == "reset GPU" {
-				continue
-			}
-			return fmt.Errorf("deatch command '%s' failed: '%v', stderr: '%s'", step.desc, execErr, stderr)
-		}
-	}
-
 	// Delete the device file (Current NVDIA drivers do not automatically delete device files and must be manually deleted).
 	if resourceType == "DRA" {
+		commandInNvidia := []struct {
+			cmd  []string
+			desc string
+		}{
+			{[]string{"rm", "/run/nvidia/driver/dev/nvidia" + targetIndex}, "remve file /run/nvidia/driver/dev/nvidiaX"},
+		}
+		for _, step := range commandInNvidia {
+			_, stderr, execErr := execCommandInPod(
+				ctx,
+				clientset,
+				restConfig,
+				nvidiaPod.Namespace,
+				nvidiaPod.Name,
+				nvidiaPod.Spec.Containers[0].Name,
+				step.cmd,
+			)
+			if execErr != nil || stderr != "" {
+				return fmt.Errorf("delete device file command '%s' failed: '%v', stderr: '%s'", step.desc, execErr, stderr)
+			}
+		}
+
 		draPod, err := getDRAKubeletPluginPod(ctx, clientset, targetNodeName)
 		if err != nil {
 			return err
@@ -157,26 +176,30 @@ func DrainGPU(ctx context.Context, clientset *kubernetes.Clientset, restConfig *
 				return fmt.Errorf("delete device file command '%s' failed: '%v', stderr: '%s'", step.desc, execErr, stderr)
 			}
 		}
+	}
 
-		commandInNvidia := []struct {
-			cmd  []string
-			desc string
-		}{
-			{[]string{"rm", "/run/nvidia/driver/dev/nvidia" + targetIndex}, "remve file /run/nvidia/driver/dev/nvidiaX"},
-		}
-		for _, step := range commandInNvidia {
-			_, stderr, execErr := execCommandInPod(
-				ctx,
-				clientset,
-				restConfig,
-				nvidiaPod.Namespace,
-				nvidiaPod.Name,
-				nvidiaPod.Spec.Containers[0].Name,
-				step.cmd,
-			)
-			if execErr != nil || stderr != "" {
-				return fmt.Errorf("delete device file command '%s' failed: '%v', stderr: '%s'", step.desc, execErr, stderr)
+	detachCommands := []struct {
+		cmd  []string
+		desc string
+	}{
+		{[]string{"nvidia-smi", "drain", "-p", targetGPUBusID, "-m", "1"}, "set maintenance mode"},
+		{[]string{"nvidia-smi", "drain", "-p", targetGPUBusID, "-r"}, "reset GPU"},
+	}
+	for _, step := range detachCommands {
+		_, stderr, execErr := execCommandInPod(
+			ctx,
+			clientset,
+			restConfig,
+			nvidiaPod.Namespace,
+			nvidiaPod.Name,
+			nvidiaPod.Spec.Containers[0].Name,
+			step.cmd,
+		)
+		if execErr != nil || stderr != "" {
+			if step.desc == "reset GPU" {
+				continue
 			}
+			return fmt.Errorf("deatch command '%s' failed: '%v', stderr: '%s'", step.desc, execErr, stderr)
 		}
 	}
 
