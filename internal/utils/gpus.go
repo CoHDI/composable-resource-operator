@@ -135,7 +135,7 @@ func DrainGPU(ctx context.Context, clientset *kubernetes.Clientset, restConfig *
 			cmd  []string
 			desc string
 		}{
-			{[]string{"rm", "/run/nvidia/driver/dev/nvidia" + targetIndex}, "remve file /run/nvidia/driver/dev/nvidiaX"},
+			{[]string{"rm", "-f", "/run/nvidia/driver/dev/nvidia" + targetIndex}, "remve file /run/nvidia/driver/dev/nvidiaX"},
 		}
 		for _, step := range commandInNvidia {
 			_, stderr, execErr := execCommandInPod(
@@ -160,7 +160,7 @@ func DrainGPU(ctx context.Context, clientset *kubernetes.Clientset, restConfig *
 			cmd  []string
 			desc string
 		}{
-			{[]string{"rm", "/dev/nvidia" + targetIndex}, "remove file /dev/nvidiaX"},
+			{[]string{"rm", "-f", "/dev/nvidia" + targetIndex}, "remove file /dev/nvidiaX"},
 		}
 		for _, step := range commandInDRA {
 			_, stderr, execErr := execCommandInPod(
