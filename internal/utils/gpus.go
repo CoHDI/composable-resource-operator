@@ -16,6 +16,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
 	"k8s.io/utils/ptr"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	crov1alpha1 "github.com/IBM/composable-resource-operator/api/v1alpha1"
@@ -28,7 +29,13 @@ type GPUStatus struct {
 	MemoryUsed int
 }
 
+var (
+	gpusLog = ctrl.Log.WithName("utils_gpus")
+)
+
 func DrainGPU(ctx context.Context, clientset *kubernetes.Clientset, restConfig *rest.Config, targetNodeName string, targetGPUUUID string, resourceType string) error {
+	gpusLog.Info("start removing gpu", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
+
 	// Get the info about gpu.
 	nvidiaPod, err := getNvidiaDriverDaemonsetPod(ctx, clientset, targetNodeName)
 	if err != nil {
@@ -66,8 +73,11 @@ func DrainGPU(ctx context.Context, clientset *kubernetes.Clientset, restConfig *
 	}
 	if targetGPUBusID == "" {
 		// It can be considered to have been removed, so no error is required.
+		gpusLog.Info("cannot find the gpu bus id, it should have been removed", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
 		return nil
 	}
+
+	gpusLog.Info("find the gpu bus id", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID, "targetGPUBusID", targetGPUBusID, "targetIndex", targetIndex)
 
 	// Detach with nvidia-smi command. Execute in nvidia-driver-daemonset Pod.
 	disableCommand := []struct {
@@ -77,7 +87,7 @@ func DrainGPU(ctx context.Context, clientset *kubernetes.Clientset, restConfig *
 		{[]string{"nvidia-smi", "-i", targetGPUUUID, "-pm", "0"}, "disable persistence mode"},
 	}
 	for _, step := range disableCommand {
-		_, stderr, execErr := execCommandInPod(
+		_, stdErr, execErr := execCommandInPod(
 			ctx,
 			clientset,
 			restConfig,
@@ -86,11 +96,8 @@ func DrainGPU(ctx context.Context, clientset *kubernetes.Clientset, restConfig *
 			nvidiaPod.Spec.Containers[0].Name,
 			step.cmd,
 		)
-		if execErr != nil || stderr != "" {
-			if step.desc == "reset GPU" {
-				continue
-			}
-			return fmt.Errorf("deatch command '%s' failed: '%v', stderr: '%s'", step.desc, execErr, stderr)
+		if execErr != nil || stdErr != "" {
+			return fmt.Errorf("deatch command '%s' failed: '%v', stderr: '%s'", step.desc, execErr, stdErr)
 		}
 	}
 
@@ -262,6 +269,8 @@ func execCommandInPod(ctx context.Context, clientset *kubernetes.Clientset, rest
 	if err != nil {
 		return "", "", err
 	}
+
+	gpusLog.Info("start running the command", "podName", podName, "containerName", containerName, "command", command)
 
 	var stdout, stderr bytes.Buffer
 	err = executor.StreamWithContext(
