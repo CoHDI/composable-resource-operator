@@ -23,6 +23,7 @@ import (
 	"os"
 	"time"
 
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -85,6 +86,9 @@ func (r *ComposableResourceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	composableResource := &crov1alpha1.ComposableResource{}
 	if err := r.Get(ctx, req.NamespacedName, composableResource); err != nil {
 		composableResourceLog.Error(err, "failed to get composableResource", "request", req.NamespacedName)
+		if k8serrors.IsNotFound(err) {
+			return doNotRequeue()
+		}
 		return requeueOnErr(err)
 	}
 

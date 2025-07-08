@@ -99,7 +99,7 @@ func (r *ComposabilityRequestReconciler) Reconcile(ctx context.Context, req ctrl
 
 	err := fmt.Errorf("could not find the resource: %s", req.NamespacedName)
 	composabilityRequestLog.Error(err, "failed to get resource", "request", req.NamespacedName)
-	return requeueOnErr(err)
+	return doNotRequeue()
 }
 
 func (r *ComposabilityRequestReconciler) handleRequestChange(ctx context.Context, composabilityRequest *crov1alpha1.ComposabilityRequest) (ctrl.Result, error) {
