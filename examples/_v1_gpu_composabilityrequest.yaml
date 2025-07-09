@@ -2,12 +2,16 @@ apiVersion: cro.hpsys.ibm.ie.com/v1alpha1
 kind: ComposabilityRequest
 metadata:
   name: composabilityrequest-sample
-  namespace: cro-system
 spec:
-  targetNode: "composable04"
-  resources:
-    scalar_resources:
-      gpu:
-        size: 4
-        model: "NVIDIA-A100-PCIE-40GB"
-
+  resource:
+    type: "gpu"
+    size: 2
+    model: "NVIDIA-A100-PCIE-40GB"
+    other_spec:
+      milli_cpu: 2
+      memory: 40
+      ephemeral_storage: 2
+      allowed_pod_number: 5
+    target_node: "node1"
+    force_detach: true
+    allocation_policy: "samenode"
