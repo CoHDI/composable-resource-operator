@@ -213,6 +213,28 @@ func DrainGPU(ctx context.Context, clientset *kubernetes.Clientset, restConfig *
 	return nil
 }
 
+func RunNvidiaSmi(ctx context.Context, clientset *kubernetes.Clientset, restConfig *rest.Config, targetNodeName string, targetGPUUUID string, resourceType string) error {
+	nvidiaPod, err := getNvidiaDriverDaemonsetPod(ctx, clientset, targetNodeName)
+	if err != nil {
+		return err
+	}
+	getGPUInfocommand := []string{"nvidia-smi"}
+	_, getGPUInfoStderr, err := execCommandInPod(
+		ctx,
+		clientset,
+		restConfig,
+		nvidiaPod.Namespace,
+		nvidiaPod.Name,
+		nvidiaPod.Spec.Containers[0].Name,
+		getGPUInfocommand,
+	)
+	if getGPUInfoStderr != "" || err != nil {
+		return fmt.Errorf("run nvidia-smi command failed: '%v', stderr: '%s'", err, getGPUInfoStderr)
+	}
+
+	return nil
+}
+
 func IfGPUHasLoads(ctx context.Context, clientset *kubernetes.Clientset, restConfig *rest.Config, targetNodeName string, targetGPUUUID *string) (bool, error) {
 	pod, err := getNvidiaDriverDaemonsetPod(ctx, clientset, targetNodeName)
 	if err != nil {
