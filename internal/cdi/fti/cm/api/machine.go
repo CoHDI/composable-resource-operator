@@ -55,16 +55,17 @@ type Device struct {
 }
 
 type DeviceDetail struct {
-	FabricUUID     string               `json:"fabric_uuid"`
-	FabricID       int                  `json:"fabric_id"`
-	ResourceUUID   string               `json:"res_uuid"`
-	FabricGID      string               `json:"fabr_gid"`
-	ResourceType   string               `json:"res_type"`
-	ResourceName   string               `json:"res_name"`
-	ResourceStatus string               `json:"res_status"`
-	ResourceSpec   []DeviceResourceSpec `json:"resspecs"`
-	TenantID       string               `json:"tenant_uuid"`
-	MachineID      string               `json:"mach_uuid"`
+	FabricUUID       string               `json:"fabric_uuid"`
+	FabricID         int                  `json:"fabric_id"`
+	ResourceUUID     string               `json:"res_uuid"`
+	FabricGID        string               `json:"fabr_gid"`
+	ResourceType     string               `json:"res_type"`
+	ResourceName     string               `json:"res_name"`
+	ResourceStatus   string               `json:"res_status"`
+	ResourceOPStatus string               `json:"res_op_status"`
+	ResourceSpec     []DeviceResourceSpec `json:"resspecs"`
+	TenantID         string               `json:"tenant_uuid"`
+	MachineID        string               `json:"mach_uuid"`
 }
 
 type DeviceResourceSpec struct {

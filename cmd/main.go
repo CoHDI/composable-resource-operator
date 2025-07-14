@@ -153,7 +153,7 @@ func main() {
 
 	if err = (&controller.ComposabilityRequestReconciler{
 		Client:    mgr.GetClient(),
-		ClientSet: clientset,
+		Clientset: clientset,
 		Scheme:    mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ComposabilityRequest")
@@ -162,7 +162,7 @@ func main() {
 
 	if err = (&controller.ComposableResourceReconciler{
 		Client:     mgr.GetClient(),
-		ClientSet:  clientset,
+		Clientset:  clientset,
 		Scheme:     mgr.GetScheme(),
 		RestConfig: mgr.GetConfig(),
 	}).SetupWithManager(mgr); err != nil {

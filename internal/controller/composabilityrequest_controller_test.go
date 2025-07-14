@@ -55,7 +55,7 @@ func createComposabilityRequest(
 	if targetState == "" {
 		return
 	} else {
-		composabilityRequest.SetFinalizers([]string{composabilityFinalizer})
+		composabilityRequest.SetFinalizers([]string{composabilityRequestFinalizer})
 		Expect(k8sClient.Update(ctx, composabilityRequest)).NotTo(HaveOccurred())
 
 		if composabilityRequestStatus == nil {
@@ -125,12 +125,12 @@ func createTempComposableResource(composabilityRequestName string, composableRes
 }
 
 func listComposableResources() *crov1alpha1.ComposableResourceList {
-	resourceList := &crov1alpha1.ComposableResourceList{}
+	composableResourceList := &crov1alpha1.ComposableResourceList{}
 
 	listOpts := []client.ListOption{client.InNamespace("")}
-	Expect(k8sClient.List(ctx, resourceList, listOpts...)).To(Succeed())
+	Expect(k8sClient.List(ctx, composableResourceList, listOpts...)).To(Succeed())
 
-	return resourceList
+	return composableResourceList
 }
 
 func cleanAllComposabilityRequests() {
@@ -146,12 +146,12 @@ func cleanAllComposabilityRequests() {
 }
 
 func cleanAllComposableResources() {
-	resourceList := &crov1alpha1.ComposableResourceList{}
+	composableResourceList := &crov1alpha1.ComposableResourceList{}
 	listOpts := []client.ListOption{client.InNamespace("")}
-	Expect(k8sClient.List(ctx, resourceList, listOpts...)).To(Succeed())
+	Expect(k8sClient.List(ctx, composableResourceList, listOpts...)).To(Succeed())
 
-	for i := range resourceList.Items {
-		obj := &resourceList.Items[i]
+	for i := range composableResourceList.Items {
+		obj := &composableResourceList.Items[i]
 		obj.SetFinalizers(nil)
 		Expect(k8sClient.Update(ctx, obj)).To(Succeed())
 		Expect(k8sClient.Delete(ctx, obj)).To(Or(BeNil(), WithTransform(k8serrors.IsNotFound, BeTrue())))
@@ -171,7 +171,7 @@ var baseComposabilityRequest = crov1alpha1.ComposabilityRequest{
 		},
 	},
 	Status: crov1alpha1.ComposabilityRequestStatus{
-		State: "<change it>",
+		State: "",
 		Error: "",
 		Resources: map[string]crov1alpha1.ScalarResourceStatus{
 			composableResource0Name: {
@@ -214,7 +214,7 @@ var baseComposabilityRequestUsingDifferentNode = crov1alpha1.ComposabilityReques
 		},
 	},
 	Status: crov1alpha1.ComposabilityRequestStatus{
-		State: "<change it>",
+		State: "",
 		Error: "",
 		Resources: map[string]crov1alpha1.ScalarResourceStatus{
 			composableResource0Name: {
@@ -297,12 +297,12 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 
 		controllerReconciler = &ComposabilityRequestReconciler{
 			Client:    k8sClient,
-			ClientSet: clientSet,
+			Clientset: clientSet,
 			Scheme:    k8sClient.Scheme(),
 		}
 	})
 
-	Describe("When user provides the request with invaild values", func() {
+	Describe("When user provides the ComposabilityRequest with invalid values", func() {
 		type testcase struct {
 			requestName string
 			requestSpec *crov1alpha1.ComposabilityRequestSpec
@@ -321,7 +321,17 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 			Expect(err).To(HaveOccurred())
 			Expect(err.Error()).To(Equal(tc.expectedReconcileErrorMessage))
 		},
-			Entry("should fail when user provides an invaild .spec.resource.size", testcase{
+			Entry("should fail when user provides an invalid .spec.resource.type", testcase{
+				requestName: "test-composability-request",
+				requestSpec: func() *crov1alpha1.ComposabilityRequestSpec {
+					composabilityRequestSpec := baseComposabilityRequest.Spec.DeepCopy()
+					composabilityRequestSpec.Resource.Type = "UnknownType"
+					return composabilityRequestSpec
+				}(),
+
+				expectedReconcileErrorMessage: "ComposabilityRequest.cro.hpsys.ibm.ie.com \"test-composability-request\" is invalid: spec.resource.type: Unsupported value: \"UnknownType\": supported values: \"gpu\", \"cxlmemory\"",
+			}),
+			Entry("should fail when user provides an invalid .spec.resource.size", testcase{
 				requestName: "test-composability-request",
 				requestSpec: func() *crov1alpha1.ComposabilityRequestSpec {
 					composabilityRequestSpec := baseComposabilityRequest.Spec.DeepCopy()
@@ -331,7 +341,17 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 
 				expectedReconcileErrorMessage: "ComposabilityRequest.cro.hpsys.ibm.ie.com \"test-composability-request\" is invalid: spec.resource.size: Invalid value: -1: spec.resource.size in body should be greater than or equal to 0",
 			}),
-			Entry("should fail when user provides an invaild .spec.resource.other_spec.milli_cpu", testcase{
+			Entry("should fail when user provides an invalid .spec.resource.allocation_policy", testcase{
+				requestName: "test-composability-request",
+				requestSpec: func() *crov1alpha1.ComposabilityRequestSpec {
+					composabilityRequestSpec := baseComposabilityRequest.Spec.DeepCopy()
+					composabilityRequestSpec.Resource.AllocationPolicy = "UnknownPolicy"
+					return composabilityRequestSpec
+				}(),
+
+				expectedReconcileErrorMessage: "ComposabilityRequest.cro.hpsys.ibm.ie.com \"test-composability-request\" is invalid: spec.resource.allocation_policy: Unsupported value: \"UnknownPolicy\": supported values: \"samenode\", \"differentnode\"",
+			}),
+			Entry("should fail when user provides an invalid .spec.resource.other_spec.milli_cpu", testcase{
 				requestName: "test-composability-request",
 				requestSpec: func() *crov1alpha1.ComposabilityRequestSpec {
 					composabilityRequestSpec := baseComposabilityRequest.Spec.DeepCopy()
@@ -346,7 +366,7 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 
 				expectedReconcileErrorMessage: "ComposabilityRequest.cro.hpsys.ibm.ie.com \"test-composability-request\" is invalid: spec.resource.other_spec.milli_cpu: Invalid value: -1: spec.resource.other_spec.milli_cpu in body should be greater than or equal to 0",
 			}),
-			Entry("should fail when user provides an invaild .spec.resource.other_spec.memory", testcase{
+			Entry("should fail when user provides an invalid .spec.resource.other_spec.memory", testcase{
 				requestName: "test-composability-request",
 				requestSpec: func() *crov1alpha1.ComposabilityRequestSpec {
 					composabilityRequestSpec := baseComposabilityRequest.Spec.DeepCopy()
@@ -361,7 +381,7 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 
 				expectedReconcileErrorMessage: "ComposabilityRequest.cro.hpsys.ibm.ie.com \"test-composability-request\" is invalid: spec.resource.other_spec.memory: Invalid value: -1: spec.resource.other_spec.memory in body should be greater than or equal to 0",
 			}),
-			Entry("should fail when user provides an invaild .spec.resource.other_spec.ephemeral_storage", testcase{
+			Entry("should fail when user provides an invalid .spec.resource.other_spec.ephemeral_storage", testcase{
 				requestName: "test-composability-request",
 				requestSpec: func() *crov1alpha1.ComposabilityRequestSpec {
 					composabilityRequestSpec := baseComposabilityRequest.Spec.DeepCopy()
@@ -376,7 +396,7 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 
 				expectedReconcileErrorMessage: "ComposabilityRequest.cro.hpsys.ibm.ie.com \"test-composability-request\" is invalid: spec.resource.other_spec.ephemeral_storage: Invalid value: -1: spec.resource.other_spec.ephemeral_storage in body should be greater than or equal to 0",
 			}),
-			Entry("should fail when user provides an invaild .spec.resource.other_spec.allowed_pod_number", testcase{
+			Entry("should fail when user provides an invalid .spec.resource.other_spec.allowed_pod_number", testcase{
 				requestName: "test-composability-request",
 				requestSpec: func() *crov1alpha1.ComposabilityRequestSpec {
 					composabilityRequestSpec := baseComposabilityRequest.Spec.DeepCopy()
@@ -394,7 +414,7 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 		)
 	})
 
-	Describe("In handleRequestChange function", func() {
+	Describe("When the ComposabilityRequest fails to update status", func() {
 		type testcase struct {
 			requestName        string
 			requestSpec        *crov1alpha1.ComposabilityRequestSpec
@@ -429,12 +449,10 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 				cleanComposabilityRequest(tc.requestName)
 			})
 		},
-			Entry("should fail when the request is invaild", testcase{
+			Entry("should wait when the request is invalid", testcase{
 				requestName:   "unknown-request",
 				requestSpec:   baseComposabilityRequest.Spec.DeepCopy(),
 				requestStatus: nil,
-
-				expectedReconcileError: errors.New("could not find the resource: /unknown-request"),
 			}),
 			Entry("should fail when k8s client status update fails in handleNodeAllocatingState function", testcase{
 				requestName:        "test-composability-request",
@@ -450,7 +468,7 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 
 				expectedReconcileError: errors.New("status update fails"),
 			}),
-			Entry("should fail when k8s client status update fails in handleUpdatingState function", testcase{
+			Entry("should return error when k8s client status update fails in handleUpdatingState function", testcase{
 				requestName:        "test-composability-request",
 				requestSpec:        baseComposabilityRequest.Spec.DeepCopy(),
 				requestStatus:      baseComposabilityRequest.Status.DeepCopy(),
@@ -464,7 +482,7 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 
 				expectedReconcileError: errors.New("status update fails"),
 			}),
-			Entry("should fail when k8s client status update fails in handleRunningState function", testcase{
+			Entry("should return error when k8s client status update fails in handleRunningState function", testcase{
 				requestName:        "test-composability-request",
 				requestSpec:        baseComposabilityRequest.Spec.DeepCopy(),
 				requestStatus:      baseComposabilityRequest.Status.DeepCopy(),
@@ -478,7 +496,7 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 
 				expectedReconcileError: errors.New("status update fails"),
 			}),
-			Entry("should fail when k8s client status update fails in handleCleaningState function", testcase{
+			Entry("should return error when k8s client status update fails in handleCleaningState function", testcase{
 				requestName:        "test-composability-request",
 				requestSpec:        baseComposabilityRequest.Spec.DeepCopy(),
 				requestStatus:      baseComposabilityRequest.Status.DeepCopy(),
@@ -492,7 +510,7 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 
 				expectedReconcileError: errors.New("status update fails"),
 			}),
-			Entry("should fail when k8s client status update fails in handleDeletingState function", testcase{
+			Entry("should return error when k8s client status update fails in handleDeletingState function", testcase{
 				requestName:        "test-composability-request",
 				requestSpec:        baseComposabilityRequest.Spec.DeepCopy(),
 				requestStatus:      baseComposabilityRequest.Status.DeepCopy(),
@@ -506,25 +524,24 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 
 				expectedReconcileError: errors.New("update fails"),
 			}),
-			Entry("should fail when the passed state is wrong", testcase{
+			Entry("should return error when the passed state is wrong", testcase{
 				requestName:        "test-composability-request",
 				requestSpec:        baseComposabilityRequest.Spec.DeepCopy(),
 				requestStatus:      baseComposabilityRequest.Status.DeepCopy(),
 				requestStatusState: "unknown",
 
-				expectedReconcileError: errors.New("the composabilityRequest state \"unknown\" is invaild"),
+				expectedReconcileError: errors.New("the composabilityRequest state 'unknown' is invalid"),
 			}),
 		)
 	})
 
-	Describe("In handleComposableResourceChange function", func() {
+	Describe("When the reconcile was triggered by a ComposableResource", func() {
 		type testcase struct {
 			requestName   string
 			requestSpec   *crov1alpha1.ComposabilityRequestSpec
 			requestStatus *crov1alpha1.ComposabilityRequestStatus
 			resourceName  string
 
-			setErrorMode  func()
 			extraHandling func(composabilityRequestName string, composableResourceName string)
 
 			expectedRequestStatus  *crov1alpha1.ComposabilityRequestStatus
@@ -534,7 +551,6 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 		DescribeTable("", func(tc testcase) {
 			createComposabilityRequest(tc.requestName, tc.requestSpec, tc.requestStatus, "Running")
 
-			Expect(callFunction(tc.setErrorMode)).NotTo(HaveOccurred())
 			Expect(callFunction(tc.extraHandling, tc.requestName, tc.resourceName)).NotTo(HaveOccurred())
 
 			_, err := controllerReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: tc.resourceName}})
@@ -551,16 +567,16 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 			}
 
 			DeferCleanup(func() {
-				cleanComposabilityRequest(tc.requestName)
+				cleanAllComposabilityRequests()
 				cleanAllComposableResources()
 			})
 		},
-			Entry("should succeed", testcase{
+			Entry("should successfully update .status.scalarResource in ComposabilityRequest", testcase{
 				requestName: "test-composability-request",
 				requestSpec: baseComposabilityRequest.Spec.DeepCopy(),
 				requestStatus: func() *crov1alpha1.ComposabilityRequestStatus {
 					resource := baseComposabilityRequest.Status.Resources[composableResource0Name]
-					resource.State = "<it should be changed>"
+					resource.State = "Updating"
 
 					status := baseComposabilityRequest.Status.DeepCopy()
 					status.Resources[composableResource0Name] = resource
@@ -585,12 +601,12 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 					return status
 				}(),
 			}),
-			Entry("should fail when the corresponding request does not exist", testcase{
+			Entry("should fail when the corresponding ComposabilityRequest does not exist", testcase{
 				requestName: "test-composability-request",
 				requestSpec: baseComposabilityRequest.Spec.DeepCopy(),
 				requestStatus: func() *crov1alpha1.ComposabilityRequestStatus {
 					resource := baseComposabilityRequest.Status.Resources[composableResource0Name]
-					resource.State = "<it should be changed>"
+					resource.State = "Updating"
 
 					status := baseComposabilityRequest.Status.DeepCopy()
 					status.Resources[composableResource0Name] = resource
@@ -629,7 +645,7 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 		)
 	})
 
-	Describe("In handleNoneState function", func() {
+	Describe("When the ComposabilityRequest is in None state", func() {
 		type testcase struct {
 			requestName string
 			requestSpec *crov1alpha1.ComposabilityRequestSpec
@@ -660,14 +676,14 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 			DeferCleanup(func() {
 				k8sClient.MockUpdate = nil
 
-				cleanComposabilityRequest(tc.requestName)
+				cleanAllComposabilityRequests()
 			})
 		},
-			Entry("should succeed", testcase{
+			Entry("successfully update the composabilityRequest's status to NodeAllocating", testcase{
 				requestName: "test-composability-request",
 				requestSpec: baseComposabilityRequest.Spec.DeepCopy(),
 
-				expectedRequestFinalizer: []string{composabilityFinalizer},
+				expectedRequestFinalizer: []string{composabilityRequestFinalizer},
 				expectedRequestStatus: func() *crov1alpha1.ComposabilityRequestStatus {
 					composabilityRequestStatus := baseComposabilityRequest.Status.DeepCopy()
 					composabilityRequestStatus.State = "NodeAllocating"
@@ -690,7 +706,7 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 		)
 	})
 
-	Describe("In handleNodeAllocatingState function", func() {
+	Describe("When the ComposabilityRequest is in NodeAllocating state", func() {
 		type testcase struct {
 			requestName   string
 			requestSpec   *crov1alpha1.ComposabilityRequestSpec
@@ -699,6 +715,7 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 			setErrorMode  func()
 			extraHandling func(composabilityRequestName string)
 
+			// Direct comparison is not possible because a ComposableResource's name contains a random UUID.
 			expectedDeletedComposableResources []string
 			expectedUsedComposableResources    []string
 			expectedUsedNodes                  []string
@@ -797,6 +814,7 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 				},
 			}
 			nodesToCreate := make([]*corev1.Node, len(nodes))
+
 			for i, node := range nodes {
 				nodesToCreate[i] = node.DeepCopy()
 			}
@@ -1359,7 +1377,7 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 		})
 	})
 
-	Describe("In handleUpdatingState function", func() {
+	Describe("When the ComposabilityRequest is in Updating state", func() {
 		type testcase struct {
 			requestName   string
 			requestSpec   *crov1alpha1.ComposabilityRequestSpec
@@ -1559,7 +1577,7 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 		)
 	})
 
-	Describe("In handleRunningState function", func() {
+	Describe("When the ComposabilityRequest is in Running state", func() {
 		type testcase struct {
 			requestName   string
 			requestSpec   *crov1alpha1.ComposabilityRequestSpec
@@ -1635,7 +1653,7 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 		)
 	})
 
-	Describe("In handleCleaningState function", func() {
+	Describe("When the ComposabilityRequest is in Cleaning state", func() {
 		type testcase struct {
 			requestName   string
 			requestSpec   *crov1alpha1.ComposabilityRequestSpec
@@ -1700,7 +1718,7 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 		)
 	})
 
-	Describe("In handleDeletingState function", func() {
+	Describe("When the ComposabilityRequest is in Deleting state", func() {
 		type testcase struct {
 			requestName   string
 			requestSpec   *crov1alpha1.ComposabilityRequestSpec

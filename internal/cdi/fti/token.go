@@ -17,7 +17,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-type Token struct {
+type token struct {
 	AccessToken      string `json:"access_token"`
 	ExpiresIn        int64  `json:"expires_in"`
 	RefreshExpiresIn int64  `json:"refresh_expires_in"`
@@ -69,7 +69,7 @@ func (t *CachedToken) GetToken() (*oauth2.Token, error) {
 
 	token, err := t.Token()
 	if err != nil {
-		return nil, fmt.Errorf("unable to rotate token: %v", err)
+		return nil, fmt.Errorf("unable to rotate token: %w", err)
 	}
 
 	// Update cache.
@@ -112,16 +112,16 @@ func (ts *CachedToken) Token() (*oauth2.Token, error) {
 
 	bodyBytes, err := io.ReadAll(response.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read response body: %v", err)
+		return nil, fmt.Errorf("failed to read id_manager response body: %v", err)
 	}
 
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("http returned code: %d, response body: %s", response.StatusCode, string(bodyBytes))
 	}
 
-	responseToken := &Token{}
+	responseToken := &token{}
 	if err := json.Unmarshal(bodyBytes, responseToken); err != nil {
-		return nil, fmt.Errorf("failed to read response body into Token: %v", err)
+		return nil, fmt.Errorf("failed to read id_manager response body into Token: %v", err)
 	}
 
 	var token oauth2.Token
@@ -131,18 +131,18 @@ func (ts *CachedToken) Token() (*oauth2.Token, error) {
 	token.RefreshToken = responseToken.RefreshToken
 
 	accessTokenParts := strings.Split(responseToken.AccessToken, ".")
-	if len(accessTokenParts) < 2 {
+	if len(accessTokenParts) != 3 {
 		return nil, fmt.Errorf("invalid access token: %s", responseToken.AccessToken)
 	}
 
 	payloadBytes, err := base64.RawURLEncoding.DecodeString(accessTokenParts[1])
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode payload: %s", err)
+		return nil, fmt.Errorf("failed to decode id_manager payload: %s", err)
 	}
 
 	var result accessToken
 	if err := json.Unmarshal(payloadBytes, &result); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal json: %s", err)
+		return nil, fmt.Errorf("failed to unmarshal id_manager json: %s", err)
 	}
 	token.Expiry = time.Unix(result.Expiry, 0)
 

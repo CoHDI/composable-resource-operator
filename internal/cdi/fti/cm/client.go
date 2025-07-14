@@ -83,76 +83,74 @@ func NewFTIClient(ctx context.Context, client client.Client, clientSet *kubernet
 func (f *FTIClient) AddResource(instance *v1alpha1.ComposableResource) (deviceID string, CDIDeviceID string, err error) {
 	clientLog.Info("start adding resource", "ComposableResource", instance.Name)
 
-	machineID, err := f.getNodeMachineID(instance.Spec.TargetNode)
+	machineUUID, err := f.getNodeMachineID(instance.Spec.TargetNode)
 	if err != nil {
-		clientLog.Error(err, "failed to get node MachineID", "ComposableResource", instance.Name)
+		clientLog.Error(err, "failed to get node machineUUID from cluster", "ComposableResource", instance.Name)
 		return "", "", err
 	}
 
-	machineData, err := f.getMachineInfo(machineID)
+	machineData, err := f.getMachineInfo(machineUUID)
 	if err != nil {
-		clientLog.Error(err, "failed to get MachineInfo from cm", "ComposableResource", instance.Name)
+		clientLog.Error(err, "failed to get node MachineInfo from CM", "ComposableResource", instance.Name)
 		return "", "", err
 	}
 
-	resourceList := &v1alpha1.ComposableResourceList{}
-	if err := f.client.List(f.ctx, resourceList); err != nil {
-		clientLog.Error(err, "failed to list ComposableResource")
+	composableResourceList := &v1alpha1.ComposableResourceList{}
+	if err := f.client.List(f.ctx, composableResourceList); err != nil {
+		clientLog.Error(err, "failed to list ComposableResource", "ComposableResource", instance.Name)
 		return "", "", err
 	}
 
-	matchingSpecUUID, machingSpecDeviceCount, unusedDeviceUUID, unusedDeviceErrorMessage := checkAddingResources(machineData, resourceList, instance)
+	matchingSpecUUID, machingSpecDeviceCount, unusedDeviceUUID, unusedDeviceErrorMessage := checkAddingResources(machineData, composableResourceList, instance)
 	if unusedDeviceUUID != "" {
 		return unusedDeviceUUID, unusedDeviceUUID, unusedDeviceErrorMessage
 	}
 
-	scaleUpRequest := scaleUpRequestBody{Target: scaleUpTarget{
-		SpecUUID:    matchingSpecUUID,
-		DeviceCount: machingSpecDeviceCount + 1,
-	}}
-	scaleUpRequestBody, err := json.Marshal(scaleUpRequest)
-	if err != nil {
-		clientLog.Error(err, "failed to marshal scaleUp Request Body", "ComposableResource", instance.Name)
-		return "", "", err
+	scaleUpRequest := scaleUpRequestBody{
+		Target: scaleUpTarget{
+			SpecUUID:    matchingSpecUUID,
+			DeviceCount: machingSpecDeviceCount + 1,
+		},
 	}
+	scaleUpRequestBody, _ := json.Marshal(scaleUpRequest)
 
-	pathPrefix := fmt.Sprintf("cluster_manager/cluster_autoscaler/v3/tenants/%s/clusters/%s/machines/%s/actions/resize", f.tenantID, f.clusterID, machineID)
+	pathPrefix := fmt.Sprintf("cluster_manager/cluster_autoscaler/v3/tenants/%s/clusters/%s/machines/%s/actions/resize", f.tenantID, f.clusterID, machineUUID)
 	req, err := http.NewRequest("POST", "https://"+f.compositionServiceEndpoint+pathPrefix, bytes.NewBuffer(scaleUpRequestBody))
 	if err != nil {
-		clientLog.Error(err, "failed to create new request", "ComposableResource", instance.Name)
+		clientLog.Error(err, "failed to create HTTP request for CM scaleup", "ComposableResource", instance.Name)
 		return "", "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	token, err := f.token.GetToken()
 	if err != nil {
-		clientLog.Error(err, "failed to get token", "ComposableResource", instance.Name)
+		clientLog.Error(err, "failed to get authentication token for CM scaleup", "ComposableResource", instance.Name)
 		return "", "", err
 	}
 
 	client := oauth2.NewClient(f.ctx, oauth2.StaticTokenSource(token))
 	response, err := client.Do(req)
 	if err != nil {
-		clientLog.Error(err, "failed to send request", "ComposableResource", instance.Name)
+		clientLog.Error(err, "failed to send scaleup request to CM", "ComposableResource", instance.Name)
 		return "", "", err
 	}
 	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		clientLog.Error(err, "failed to read response body", "ComposableResource", instance.Name)
+		clientLog.Error(err, "failed to read scaleup response body from CM", "ComposableResource", instance.Name)
 		return "", "", err
 	}
 
 	if response.StatusCode != http.StatusOK {
 		errBody := &fticmapi.ErrorBody{}
 		if err := json.Unmarshal(body, errBody); err != nil {
-			clientLog.Error(err, "failed to unmarshal errBody Response", "ComposableResource", instance.Name)
-			return "", "", fmt.Errorf("failed to read response data into errorBody. Original error: %w", err)
+			clientLog.Error(err, "failed to unmarshal CM scaleup error response body into errBody", "ComposableResource", instance.Name)
+			return "", "", fmt.Errorf("failed to unmarshal CM scaleup error response body into errBody. Original error: %w", err)
 		}
 
-		err = fmt.Errorf("http returned status: %d, cm return code: %s, error message: %s", errBody.Status, errBody.Detail.Code, errBody.Detail.Message)
-		clientLog.Error(err, "failed to process request", "ComposableResource", instance.Name)
+		err = fmt.Errorf("failed to process CM scaleup request. http returned status: '%d', cm return code: '%s', error message: '%s'", errBody.Status, errBody.Detail.Code, errBody.Detail.Message)
+		clientLog.Error(err, "failed to process CM scaleup request", "ComposableResource", instance.Name)
 		return "", "", err
 	}
 
@@ -164,13 +162,13 @@ func (f *FTIClient) RemoveResource(instance *v1alpha1.ComposableResource) error 
 
 	machineID, err := f.getNodeMachineID(instance.Spec.TargetNode)
 	if err != nil {
-		clientLog.Error(err, "failed to get node MachineID", "ComposableResource", instance.Name)
+		clientLog.Error(err, "failed to get node MachineID from cluster", "ComposableResource", instance.Name)
 		return err
 	}
 
 	machineData, err := f.getMachineInfo(machineID)
 	if err != nil {
-		clientLog.Error(err, "failed to get MachineInfo from cm", "ComposableResource", instance.Name)
+		clientLog.Error(err, "failed to get MachineInfo from CM", "ComposableResource", instance.Name)
 		return err
 	}
 
@@ -178,7 +176,7 @@ func (f *FTIClient) RemoveResource(instance *v1alpha1.ComposableResource) error 
 	if err != nil {
 		instance.Status.Error = err.Error()
 		if err := f.client.Status().Update(f.ctx, instance); err != nil {
-			clientLog.Error(err, "failed to remove devices", "composableResource", instance.Name)
+			clientLog.Error(err, "failed to update composableResource", "composableResource", instance.Name)
 			return err
 		}
 	}
@@ -193,49 +191,45 @@ func (f *FTIClient) RemoveResource(instance *v1alpha1.ComposableResource) error 
 			Devices:     []string{instance.Status.DeviceID},
 		},
 	}
-	scaleDownRequestBody, err := json.Marshal(scaleDownRequest)
-	if err != nil {
-		clientLog.Error(err, "failed to marshal scaleUp Request Body", "ComposableResource", instance.Name)
-		return err
-	}
+	scaleDownRequestBody, _ := json.Marshal(scaleDownRequest)
 
 	pathPrefix := fmt.Sprintf("cluster_manager/cluster_autoscaler/v3/tenants/%s/clusters/%s/machines/%s/actions/resize", f.tenantID, f.clusterID, machineID)
 	req, err := http.NewRequest("POST", "https://"+f.compositionServiceEndpoint+pathPrefix, bytes.NewBuffer(scaleDownRequestBody))
 	if err != nil {
-		clientLog.Error(err, "failed to create new request", "ComposableResource", instance.Name)
+		clientLog.Error(err, "failed to create new HTTP request for CM scaledown", "ComposableResource", instance.Name)
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 
 	token, err := f.token.GetToken()
 	if err != nil {
-		clientLog.Error(err, "failed to get token", "ComposableResource", instance.Name)
+		clientLog.Error(err, "failed to get authentication token for CM scaledown", "ComposableResource", instance.Name)
 		return err
 	}
 
 	client := oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(token))
 	response, err := client.Do(req)
 	if err != nil {
-		clientLog.Error(err, "failed to send request", "ComposableResource", instance.Name)
+		clientLog.Error(err, "failed to send scaledown request to CM", "ComposableResource", instance.Name)
 		return err
 	}
 	defer response.Body.Close()
 
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
-		clientLog.Error(err, "failed to read response body", "ComposableResource", instance.Name)
+		clientLog.Error(err, "failed to read scaledown response body from CM", "ComposableResource", instance.Name)
 		return err
 	}
 
 	if response.StatusCode != http.StatusOK {
 		errBody := &fticmapi.ErrorBody{}
 		if err := json.Unmarshal(body, errBody); err != nil {
-			clientLog.Error(err, "failed to unmarshal errBody Response", "ComposableResource", instance.Name)
-			return fmt.Errorf("failed to read response data into errorBody. Original error: %w", err)
+			clientLog.Error(err, "failed to unmarshal CM scaledown error response body into errBody", "ComposableResource", instance.Name)
+			return fmt.Errorf("failed to unmarshal CM scaledown error response body into errBody. Original error: %w", err)
 		}
 
-		err = fmt.Errorf("http returned status: %d, cm return code: %s, error message: %s", errBody.Status, errBody.Detail.Code, errBody.Detail.Message)
-		clientLog.Error(err, "failed to process request", "ComposableResource", instance.Name)
+		err = fmt.Errorf("failed to process CM scaledown request. http returned status: %d, cm return code: %s, error message: %s", errBody.Status, errBody.Detail.Code, errBody.Detail.Message)
+		clientLog.Error(err, "failed to process CM scaledown request", "ComposableResource", instance.Name)
 		return err
 	}
 
@@ -267,16 +261,21 @@ func (f *FTIClient) CheckResource(instance *v1alpha1.ComposableResource) error {
 			if condition.Column != "model" || condition.Operator != "eq" || condition.Value != instance.Spec.Model {
 				continue
 			}
+
 			for _, device := range resourceSpec.Devices {
-				if device.DeviceUUID != instance.Status.DeviceID {
-					continue
+				if device.DeviceUUID == instance.Status.DeviceID {
+					if device.Detail.ResourceOPStatus == "0" {
+						// The target device exists and has no error, return OK.
+						return nil
+					} else if device.Detail.ResourceOPStatus == "1" {
+						return fmt.Errorf("the target gpu '%s' is showing a Warning status in CM", instance.Status.DeviceID)
+					} else if device.Detail.ResourceOPStatus == "2" {
+						return fmt.Errorf("the target gpu '%s' is showing a Critical status in CM", instance.Status.DeviceID)
+					} else {
+						return fmt.Errorf("the target gpu '%s' has unknown status '%s' in CM", instance.Status.DeviceID, device.Detail.ResourceOPStatus)
+					}
 				}
 
-				if device.Status == addFailed || device.Status == removeFailed {
-					return fmt.Errorf("%s", device.StatusReason)
-				}
-				// The gpu device was found and did not report an error, so the check was successful.
-				return nil
 			}
 		}
 	}
@@ -295,7 +294,7 @@ func (f *FTIClient) getNodeMachineID(nodeName string) (string, error) {
 	machineInfo := node.GetAnnotations()["machine.openshift.io/machine"]
 	machineInfoParts := strings.Split(machineInfo, "/")
 	if len(machineInfoParts) != 2 {
-		return "", fmt.Errorf("failed to get annoation 'machine.openshift.io/machine' from Node %s, now is '%s'", node.Name, machineInfo)
+		return "", fmt.Errorf("failed to get annotation 'machine.openshift.io/machine' from Node %s, now is '%s'", node.Name, machineInfo)
 	}
 
 	machine := &machinev1beta1.Metal3Machine{}
@@ -312,6 +311,10 @@ func (f *FTIClient) getNodeMachineID(nodeName string) (string, error) {
 	bmh := &metal3v1alpha1.BareMetalHost{}
 	if err := f.client.Get(f.ctx, client.ObjectKey{Namespace: bmhInfoParts[0], Name: bmhInfoParts[1]}, bmh); err != nil {
 		return "", err
+	}
+
+	if bmh.GetAnnotations() == nil || bmh.GetAnnotations()["cluster-manager.cdi.io/machine"] == "" {
+		return "", fmt.Errorf("failed to get annotation 'cluster-manager.cdi.io/machine' from BareMetalHost %s, now is '%s'", bmh.Name, bmh.GetAnnotations()["cluster-manager.cdi.io/machine"])
 	}
 
 	return bmh.GetAnnotations()["cluster-manager.cdi.io/machine"], nil
@@ -344,24 +347,24 @@ func (f *FTIClient) getMachineInfo(machineID string) (*fticmapi.Data, error) {
 	if response.StatusCode != http.StatusOK {
 		errBody := &fticmapi.ErrorBody{}
 		if err := json.Unmarshal(body, errBody); err != nil {
-			return nil, fmt.Errorf("failed to read response data into errorBody. Original error: %w", err)
+			return nil, fmt.Errorf("failed to unmarshal CM get error response body into errBody. Original error: %w", err)
 		}
 
-		err = fmt.Errorf("http returned status: %d, cm return code: %s, error message: %s", errBody.Status, errBody.Detail.Code, errBody.Detail.Message)
+		err = fmt.Errorf("failed to process CM get request. http returned status: '%d', cm return code: '%s', error message: '%s'", errBody.Status, errBody.Detail.Code, errBody.Detail.Message)
 		return nil, err
 	}
 
 	machineData := &fticmapi.MachineData{}
 	if err := json.Unmarshal(body, machineData); err != nil {
-		return nil, fmt.Errorf("failed to read response body into machineData: %v", err)
+		return nil, fmt.Errorf("failed to unmarshal CM get machine response body into machineData: %w", err)
 	}
 
 	return &machineData.Data, nil
 }
 
-func checkAddingResources(machineData *fticmapi.Data, resourceList *v1alpha1.ComposableResourceList, instance *v1alpha1.ComposableResource) (string, int, string, error) {
+func checkAddingResources(machineData *fticmapi.Data, composableResourceList *v1alpha1.ComposableResourceList, instance *v1alpha1.ComposableResource) (string, int, string, error) {
 	existingDevices := make(map[string]bool)
-	for _, resource := range resourceList.Items {
+	for _, resource := range composableResourceList.Items {
 		existingDevices[resource.Status.DeviceID] = true
 	}
 
@@ -376,7 +379,7 @@ func checkAddingResources(machineData *fticmapi.Data, resourceList *v1alpha1.Com
 			if unusedDevice.Status == addComplete {
 				return "", 0, unusedDevice.DeviceUUID, nil
 			} else if unusedDevice.Status == addFailed {
-				return "", 0, unusedDevice.DeviceUUID, fmt.Errorf("%s", unusedDevice.StatusReason)
+				return "", 0, unusedDevice.DeviceUUID, fmt.Errorf("an error occurred with the resource in CM: '%s'", unusedDevice.StatusReason)
 			}
 		}
 

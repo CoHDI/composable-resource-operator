@@ -22,64 +22,139 @@ import (
 	crov1alpha1 "github.com/IBM/composable-resource-operator/api/v1alpha1"
 )
 
-type GPUStatus struct {
-	UUID       string
-	PciBusID   string
-	GPUUsed    int
-	MemoryUsed int
-}
-
 var (
 	gpusLog = ctrl.Log.WithName("utils_gpus")
 )
 
-func DrainGPU(ctx context.Context, clientset *kubernetes.Clientset, restConfig *rest.Config, targetNodeName string, targetGPUUUID string, resourceType string) error {
-	gpusLog.Info("start removing gpu", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
+type AccountedAppInfo struct {
+	GPUUUID     string
+	ProcessName string
+}
 
-	// Get the info about gpu.
-	nvidiaPod, err := getNvidiaDriverDaemonsetPod(ctx, clientset, targetNodeName)
+func (a AccountedAppInfo) String() string {
+	return fmt.Sprintf("GPUUUID: '%s', ProcessName: '%s'", a.GPUUUID, a.ProcessName)
+}
+
+func CheckGPUVisible(ctx context.Context, client client.Client, clientset *kubernetes.Clientset, restConfig *rest.Config, deviceResourceType string, resource *crov1alpha1.ComposableResource) (bool, error) {
+	if deviceResourceType == "DRA" {
+		resourceSliceList := &resourcev1alpha3.ResourceSliceList{}
+		if err := client.List(ctx, resourceSliceList); err != nil {
+			return false, err
+		}
+
+		for _, rs := range resourceSliceList.Items {
+			for _, device := range rs.Spec.Devices {
+				for attrName, attrValue := range device.Basic.Attributes {
+					if attrName == "uuid" && *attrValue.StringValue == resource.Status.DeviceID {
+						return true, nil
+					}
+				}
+			}
+		}
+
+		return false, nil
+	} else {
+		gpuInfos, err := getGPUInfoFromNvidiaPod(ctx, client, clientset, restConfig, resource.Spec.TargetNode, "gpu_uuid")
+		if err != nil {
+			return false, err
+		}
+
+		for _, gpuInfo := range gpuInfos {
+			if gpuInfo["gpu_uuid"] == resource.Status.DeviceID {
+				return true, nil
+			}
+		}
+
+		return false, nil
+	}
+}
+
+func CheckNoGPULoads(ctx context.Context, client client.Client, clientset *kubernetes.Clientset, restConfig *rest.Config, targetNodeName string, targetGPUUUID *string) error {
+	pod, err := getNvidiaDriverDaemonsetPod(ctx, client, targetNodeName)
 	if err != nil {
 		return err
 	}
-	getGPUInfocommand := []string{"nvidia-smi", "--query-gpu=index,gpu_uuid,pci.bus_id", "--format=csv,noheader,nounits"}
-	getGPUInfoStdout, getGPUInfoStderr, err := execCommandInPod(
+
+	command := []string{"nvidia-smi", "--query-accounted-apps=gpu_uuid,process_name", "--format=csv,noheader,nounits"}
+	stdout, stderr, err := execCommandInPod(
 		ctx,
 		clientset,
 		restConfig,
-		nvidiaPod.Namespace,
-		nvidiaPod.Name,
-		nvidiaPod.Spec.Containers[0].Name,
-		getGPUInfocommand,
+		pod.Namespace,
+		pod.Name,
+		pod.Spec.Containers[0].Name,
+		command,
 	)
-	if getGPUInfoStderr != "" || err != nil {
-		return fmt.Errorf("get gpu info command failed: '%v', stderr: '%s'", err, getGPUInfoStderr)
+	if stderr != "" || err != nil {
+		return fmt.Errorf("run nvidia-smi to check gpu loads failed: '%v', stderr: '%s'", err, stderr)
 	}
 
-	// Parse the info about gpu.
-	targetIndex := ""
-	targetGPUBusID := ""
-	for _, line := range strings.Split(strings.TrimSpace(string(getGPUInfoStdout)), "\n") {
+	var accountedApps []AccountedAppInfo
+
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+
 		parts := strings.Split(line, ",")
 
-		index := strings.TrimSpace(parts[0])
-		gpuUUID := strings.TrimSpace(parts[1])
-		pciBusID := strings.TrimSpace(parts[2])
+		appInfo := AccountedAppInfo{
+			GPUUUID:     strings.TrimSpace(parts[0]),
+			ProcessName: strings.TrimSpace(parts[1]),
+		}
+		accountedApps = append(accountedApps, appInfo)
+	}
 
-		if gpuUUID == targetGPUUUID {
-			targetGPUBusID = strings.TrimPrefix(pciBusID, "0000")
-			targetIndex = index
+	if targetGPUUUID == nil {
+		// When targetGPUUUID is nil, it means that there should be no load on the target node.
+		if len(accountedApps) > 0 {
+			return fmt.Errorf("found gpu loads on node '%s': '%v'", targetNodeName, accountedApps)
+		}
+	} else {
+		// When targetGPUUUID is not nil, it means that there should be no load on the target gpu.
+		for _, appInfo := range accountedApps {
+			if appInfo.GPUUUID == *targetGPUUUID {
+				return fmt.Errorf("found gpu load on gpu '%s': %v", *targetGPUUUID, accountedApps)
+			}
+		}
+	}
+
+	return nil
+}
+
+func DrainGPU(ctx context.Context, client client.Client, clientset *kubernetes.Clientset, restConfig *rest.Config, targetNodeName string, targetGPUUUID string, deviceResourceType string) error {
+	gpusLog.Info("start draining gpu", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
+
+	nvidiaPod, err := getNvidiaDriverDaemonsetPod(ctx, client, targetNodeName)
+	if err != nil {
+		return err
+	}
+
+	// Get information about the GPU to be drained.
+	gpuInfos, err := getGPUInfoFromNvidiaPod(ctx, client, clientset, restConfig, targetNodeName, "index,gpu_uuid,pci.bus_id")
+	if err != nil {
+		return err
+	}
+
+	targetGPUIndex := ""
+	targetGPUBusID := ""
+	for _, gpuInfo := range gpuInfos {
+		if gpuInfo["gpu_uuid"] == targetGPUUUID {
+			targetGPUIndex = gpuInfo["index"]
+			targetGPUBusID = strings.TrimPrefix(gpuInfo["pci.bus_id"], "0000")
 			break
 		}
 	}
 	if targetGPUBusID == "" {
-		// It can be considered to have been removed, so no error is required.
-		gpusLog.Info("cannot find the gpu bus id, it should have been removed", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
+		// It can be considered to have been drained, so no error is required.
+		gpusLog.Info("cannot find the gpu bus id, it should have been drained", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
 		return nil
 	}
 
-	gpusLog.Info("find the gpu bus id", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID, "targetGPUBusID", targetGPUBusID, "targetIndex", targetIndex)
+	gpusLog.Info("find the gpu bus id", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID, "targetGPUBusID", targetGPUBusID, "targetIndex", targetGPUIndex)
 
-	// Detach with nvidia-smi command. Execute in nvidia-driver-daemonset Pod.
+	// Disable gpu with nvidia-smi command. It should be executed in nvidia-driver-daemonset Pod.
 	disableCommand := []struct {
 		cmd  []string
 		desc string
@@ -103,7 +178,7 @@ func DrainGPU(ctx context.Context, clientset *kubernetes.Clientset, restConfig *
 
 	// Check that /dev/nvidiaX is not open.
 	var checkShell = `
-        TARGET_FILE="/dev/nvidia` + targetIndex + `";
+        TARGET_FILE="/dev/nvidia` + targetGPUIndex + `";
         for PID_DIR in /proc/[0-9]*; do
             PID=$(basename "$PID_DIR");
             CMD_NAME=$(cat "$PID_DIR/comm" 2>/dev/null || echo "[unknown]")
@@ -137,14 +212,14 @@ func DrainGPU(ctx context.Context, clientset *kubernetes.Clientset, restConfig *
 	}
 
 	// Delete the device file (Current NVDIA drivers do not automatically delete device files and must be manually deleted).
-	if resourceType == "DRA" {
-		commandInNvidia := []struct {
+	if deviceResourceType == "DRA" {
+		rmInNvidia := []struct {
 			cmd  []string
 			desc string
 		}{
-			{[]string{"rm", "-f", "/run/nvidia/driver/dev/nvidia" + targetIndex}, "remve file /run/nvidia/driver/dev/nvidiaX"},
+			{[]string{"rm", "-f", "/run/nvidia/driver/dev/nvidia" + targetGPUIndex}, "remove file /run/nvidia/driver/dev/nvidiaX"},
 		}
-		for _, step := range commandInNvidia {
+		for _, step := range rmInNvidia {
 			_, stderr, execErr := execCommandInPod(
 				ctx,
 				clientset,
@@ -163,13 +238,14 @@ func DrainGPU(ctx context.Context, clientset *kubernetes.Clientset, restConfig *
 		if err != nil {
 			return err
 		}
-		commandInDRA := []struct {
+
+		rmInDRA := []struct {
 			cmd  []string
 			desc string
 		}{
-			{[]string{"rm", "-f", "/dev/nvidia" + targetIndex}, "remove file /dev/nvidiaX"},
+			{[]string{"rm", "-f", "/dev/nvidia" + targetGPUIndex}, "remove file /dev/nvidiaX"},
 		}
-		for _, step := range commandInDRA {
+		for _, step := range rmInDRA {
 			_, stderr, execErr := execCommandInPod(
 				ctx,
 				clientset,
@@ -185,6 +261,7 @@ func DrainGPU(ctx context.Context, clientset *kubernetes.Clientset, restConfig *
 		}
 	}
 
+	// Detach gpu with nvidia-smi command. It should be executed in nvidia-driver-daemonset Pod.
 	detachCommands := []struct {
 		cmd  []string
 		desc string
@@ -213,131 +290,13 @@ func DrainGPU(ctx context.Context, clientset *kubernetes.Clientset, restConfig *
 	return nil
 }
 
-func RunNvidiaSmi(ctx context.Context, clientset *kubernetes.Clientset, restConfig *rest.Config, targetNodeName string, targetGPUUUID string, resourceType string) error {
-	nvidiaPod, err := getNvidiaDriverDaemonsetPod(ctx, clientset, targetNodeName)
+func RunNvidiaSmi(ctx context.Context, client client.Client, clientset *kubernetes.Clientset, restConfig *rest.Config, targetNodeName string) error {
+	_, err := getGPUInfoFromNvidiaPod(ctx, client, clientset, restConfig, targetNodeName, "gpu_uuid")
 	if err != nil {
 		return err
 	}
-	getGPUInfocommand := []string{"nvidia-smi"}
-	_, getGPUInfoStderr, err := execCommandInPod(
-		ctx,
-		clientset,
-		restConfig,
-		nvidiaPod.Namespace,
-		nvidiaPod.Name,
-		nvidiaPod.Spec.Containers[0].Name,
-		getGPUInfocommand,
-	)
-	if getGPUInfoStderr != "" || err != nil {
-		return fmt.Errorf("run nvidia-smi command failed: '%v', stderr: '%s'", err, getGPUInfoStderr)
-	}
 
 	return nil
-}
-
-func IfGPUHasLoads(ctx context.Context, clientset *kubernetes.Clientset, restConfig *rest.Config, targetNodeName string, targetGPUUUID *string) (bool, error) {
-	pod, err := getNvidiaDriverDaemonsetPod(ctx, clientset, targetNodeName)
-	if err != nil {
-		return true, err
-	}
-
-	command := []string{"nvidia-smi", "--query-accounted-apps=gpu_uuid", "--format=csv,noheader,nounits"}
-	stdout, stderr, err := execCommandInPod(
-		ctx,
-		clientset,
-		restConfig,
-		pod.Namespace,
-		pod.Name,
-		pod.Spec.Containers[0].Name,
-		command,
-	)
-	if stderr != "" || err != nil {
-		return true, fmt.Errorf("nvidia-smi failed: %v, stderr: %s", err, stderr)
-	}
-
-	if targetGPUUUID == nil {
-		// When targetGPUUUID is nil, it means that there should be no load on the target node.
-		if stdout != "" {
-			return true, nil
-		}
-	} else {
-		for _, line := range strings.Split(strings.TrimSpace(string(stdout)), "\n") {
-			gpuUUID := strings.TrimSpace(line)
-			if gpuUUID == *targetGPUUUID {
-				return true, nil
-			}
-		}
-	}
-
-	return false, nil
-}
-
-func execCommandInPod(ctx context.Context, clientset *kubernetes.Clientset, restConfig *rest.Config, namespace, podName, containerName string, command []string) (string, string, error) {
-	req := clientset.CoreV1().RESTClient().Post().
-		Resource("pods").
-		Name(podName).
-		Namespace(namespace).
-		SubResource("exec").
-		VersionedParams(&corev1.PodExecOptions{
-			Container: containerName,
-			Command:   command,
-			Stdin:     false,
-			Stdout:    true,
-			Stderr:    true,
-			TTY:       false,
-		}, scheme.ParameterCodec)
-
-	executor, err := remotecommand.NewSPDYExecutor(restConfig, "POST", req.URL())
-	if err != nil {
-		return "", "", err
-	}
-
-	gpusLog.Info("start running the command", "podName", podName, "containerName", containerName, "command", command)
-
-	var stdout, stderr bytes.Buffer
-	err = executor.StreamWithContext(
-		ctx,
-		remotecommand.StreamOptions{
-			Stdout: &stdout,
-			Stderr: &stderr,
-		},
-	)
-	return stdout.String(), stderr.String(), err
-}
-
-func getNvidiaDriverDaemonsetPod(ctx context.Context, clientset *kubernetes.Clientset, targetNodeName string) (*corev1.Pod, error) {
-	pods, err := clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("app.kubernetes.io/component=nvidia-driver"),
-		FieldSelector: fmt.Sprintf("spec.nodeName=%s", targetNodeName),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list pods: %v", err)
-	}
-	if len(pods.Items) == 0 {
-		return nil, fmt.Errorf("no Pod named 'nvidia-driver-daemonset' found on node %s", targetNodeName)
-	}
-
-	pod := pods.Items[0]
-
-	return &pod, nil
-}
-
-func getDRAKubeletPluginPod(ctx context.Context, clientset *kubernetes.Clientset, targetNodeName string) (*corev1.Pod, error) {
-	pods, err := clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("app.kubernetes.io/name=nvidia-dra-driver-gpu"),
-		FieldSelector: fmt.Sprintf("spec.nodeName=%s", targetNodeName),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list pods: %v", err)
-	}
-
-	for _, pod := range pods.Items {
-		if strings.HasPrefix(pod.Name, "nvidia-dra-driver-gpu-kubelet-plugin") {
-			return &pod, nil
-		}
-	}
-
-	return nil, fmt.Errorf("no Pod named 'nvidia-dra-driver-gpu-kubelet-plugin' found on node %s", targetNodeName)
 }
 
 func CreateGPUTaintRule(ctx context.Context, client client.Client, resource *crov1alpha1.ComposableResource) error {
@@ -395,4 +354,109 @@ func DeleteGPUTaintRule(ctx context.Context, client client.Client, resource *cro
 	}
 
 	return err
+}
+
+func execCommandInPod(ctx context.Context, clientset *kubernetes.Clientset, restConfig *rest.Config, namespace string, podName string, containerName string, command []string) (string, string, error) {
+	request := clientset.CoreV1().RESTClient().Post().Resource("pods").Name(podName).Namespace(namespace).SubResource("exec").
+		VersionedParams(&corev1.PodExecOptions{
+			Container: containerName,
+			Command:   command,
+			Stdin:     false,
+			Stdout:    true,
+			Stderr:    true,
+			TTY:       false,
+		}, scheme.ParameterCodec)
+
+	executor, err := remotecommand.NewSPDYExecutor(restConfig, "POST", request.URL())
+	if err != nil {
+		return "", "", err
+	}
+
+	gpusLog.Info("start running the command", "podName", podName, "containerName", containerName, "command", command)
+
+	var stdout, stderr bytes.Buffer
+	err = executor.StreamWithContext(
+		ctx,
+		remotecommand.StreamOptions{
+			Stdout: &stdout,
+			Stderr: &stderr,
+		},
+	)
+	return stdout.String(), stderr.String(), err
+}
+
+func getNvidiaDriverDaemonsetPod(ctx context.Context, c client.Client, targetNodeName string) (*corev1.Pod, error) {
+	podList := &corev1.PodList{}
+	listOpts := []client.ListOption{
+		client.InNamespace(""),
+		client.MatchingLabels{"app.kubernetes.io/component": "nvidia-driver"},
+		client.MatchingFields{"spec.nodeName": targetNodeName},
+	}
+	if err := c.List(ctx, podList, listOpts...); err != nil {
+		return nil, fmt.Errorf("failed to list pods: %w", err)
+	}
+	if len(podList.Items) == 0 {
+		return nil, fmt.Errorf("no Pod with label 'app.kubernetes.io/component=nvidia-driver' found on node %s", targetNodeName)
+	}
+
+	pod := podList.Items[0]
+	return &pod, nil
+}
+
+func getDRAKubeletPluginPod(ctx context.Context, clientset *kubernetes.Clientset, targetNodeName string) (*corev1.Pod, error) {
+	pods, err := clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("app.kubernetes.io/name=nvidia-dra-driver-gpu"),
+		FieldSelector: fmt.Sprintf("spec.nodeName=%s", targetNodeName),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pods: %v", err)
+	}
+
+	for _, pod := range pods.Items {
+		if strings.HasPrefix(pod.Name, "nvidia-dra-driver-gpu-kubelet-plugin") {
+			return &pod, nil
+		}
+	}
+
+	return nil, fmt.Errorf("no Pod named 'nvidia-dra-driver-gpu-kubelet-plugin' found on node %s", targetNodeName)
+}
+
+func getGPUInfoFromNvidiaPod(ctx context.Context, client client.Client, clientset *kubernetes.Clientset, restConfig *rest.Config, targetNodeName string, queryArgs string) ([]map[string]string, error) {
+	fieldNames := strings.Split(queryArgs, ",")
+
+	nvidiaPod, err := getNvidiaDriverDaemonsetPod(ctx, client, targetNodeName)
+	if err != nil {
+		return nil, err
+	}
+
+	command := []string{"nvidia-smi", "--query-gpu=" + queryArgs, "--format=csv,noheader,nounits"}
+	stdout, stderr, err := execCommandInPod(
+		ctx,
+		clientset,
+		restConfig,
+		nvidiaPod.Namespace,
+		nvidiaPod.Name,
+		nvidiaPod.Spec.Containers[0].Name,
+		command,
+	)
+	if stderr != "" || err != nil {
+		return nil, fmt.Errorf("get gpu info command failed: err='%v', stderr='%s'", err, stderr)
+	}
+
+	var gpuInfos []map[string]string
+	for _, line := range strings.Split(strings.TrimSpace(string(stdout)), "\n") {
+		if line == "" {
+			continue
+		}
+
+		parts := strings.Split(line, ",")
+
+		gpuInfo := make(map[string]string)
+		for i, fieldName := range fieldNames {
+			gpuInfo[fieldName] = strings.TrimSpace(parts[i])
+		}
+		gpuInfos = append(gpuInfos, gpuInfo)
+	}
+
+	return gpuInfos, nil
 }

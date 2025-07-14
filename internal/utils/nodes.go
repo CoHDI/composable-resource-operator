@@ -5,86 +5,88 @@ import (
 	"fmt"
 	"time"
 
-	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
+	appsv1 "k8s.io/api/apps/v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/IBM/composable-resource-operator/api/v1alpha1"
 )
 
-func RestartDaemonset(clientSet *kubernetes.Clientset, ctx context.Context, namespace string, name string) error {
-	daemonset, err := clientSet.AppsV1().DaemonSets(namespace).Get(ctx, name, metav1.GetOptions{})
-	if err != nil {
+var (
+	nodesLog = ctrl.Log.WithName("utils_nodes")
+)
+
+func RestartDaemonset(ctx context.Context, client client.Client, namespace string, name string) error {
+	daemonset := &appsv1.DaemonSet{}
+	if err := client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, daemonset); err != nil {
 		return err
+	}
+
+	if daemonset.Status.NumberReady < daemonset.Status.DesiredNumberScheduled ||
+		daemonset.Status.CurrentNumberScheduled < daemonset.Status.DesiredNumberScheduled ||
+		daemonset.Status.NumberUnavailable > 0 ||
+		daemonset.Status.NumberMisscheduled > 0 {
+		nodesLog.Info("skip restart because daemonSet is not in a fully stable and ready state", "namespace", namespace, "name", name)
+		return nil
 	}
 
 	if daemonset.Spec.Template.Annotations == nil {
 		daemonset.Spec.Template.Annotations = make(map[string]string)
 	}
 
+	restartedAt, ok := daemonset.Spec.Template.Annotations["kubectl.kubernetes.io/restartedAt"]
+	if ok {
+		lastRestartTime, err := time.Parse(time.RFC3339, restartedAt)
+		if err == nil {
+			if time.Since(lastRestartTime) <= 5*time.Minute {
+				nodesLog.Info("skip restart because daemonSet already restarted recently", "namespace", namespace, "name", name, "restartedAt", restartedAt)
+				return nil
+			}
+		} else {
+			return fmt.Errorf("failed to parse restartedAt annotation for DaemonSet %s/%s: '%v'", namespace, name, err)
+		}
+	}
+
 	daemonset.Spec.Template.Annotations["kubectl.kubernetes.io/restartedAt"] = time.Now().Format(time.RFC3339)
-
-	_, err = clientSet.AppsV1().DaemonSets(namespace).Update(ctx, daemonset, metav1.UpdateOptions{})
-	return err
-}
-
-func GetNode(ctx context.Context, clientSet *kubernetes.Clientset, nodeName string) (*v1.Node, error) {
-	node, err := clientSet.CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
-	if err != nil {
-		return nil, err
-	}
-
-	return node, nil
-}
-
-func GetAllNodes(ctx context.Context, clientSet *kubernetes.Clientset) (*v1.NodeList, error) {
-	nodes, err := clientSet.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, err
-	}
-
-	return nodes, nil
-}
-
-func IsNodeExisted(ctx context.Context, clientSet *kubernetes.Clientset, nodeName string) error {
-	_, err := GetNode(ctx, clientSet, nodeName)
-	if err != nil {
+	if err := client.Update(ctx, daemonset); err != nil {
 		return err
 	}
 
+	nodesLog.Info("daemonSet restarted successfully", "namespace", namespace, "name", name)
 	return nil
 }
 
-func IsNodeCapacitySufficient(ctx context.Context, clientSet *kubernetes.Clientset, nodeName string, nodeSpec *v1alpha1.NodeSpec) (bool, error) {
-	node, err := GetNode(ctx, clientSet, nodeName)
+func CheckNodeCapacitySufficient(ctx context.Context, client client.Client, nodeName string, nodeSpec *v1alpha1.NodeSpec) (bool, error) {
+	node, err := getNode(ctx, client, nodeName)
 	if err != nil {
 		return false, err
 	}
 
-	nodeCPU := node.Status.Capacity[v1.ResourceCPU]
-	nodeEphemeralStorage := node.Status.Capacity[v1.ResourceEphemeralStorage]
-	nodePods := node.Status.Capacity[v1.ResourcePods]
-	nodeMemory := node.Status.Capacity[v1.ResourceMemory]
+	nodeCPU := node.Status.Capacity[corev1.ResourceCPU]
+	nodeEphemeralStorage := node.Status.Capacity[corev1.ResourceEphemeralStorage]
+	nodePods := node.Status.Capacity[corev1.ResourcePods]
+	nodeMemory := node.Status.Capacity[corev1.ResourceMemory]
 
 	nodeCPUQuantity, ok := nodeCPU.AsInt64()
 	if !ok {
-		return false, fmt.Errorf("failed to convert node's CPU resource to int64")
+		return false, fmt.Errorf("failed to convert node's CPU resource '%v' to int64", nodeCPU)
 	}
 
 	nodeMemoryQuantity, ok := nodeMemory.AsInt64()
 	if !ok {
-		return false, fmt.Errorf("failed to convert node's memory resource to int64")
+		return false, fmt.Errorf("failed to convert node's memory resource '%v' to int64", nodeEphemeralStorage)
 	}
 
 	nodePodsQuantity, ok := nodePods.AsInt64()
 	if !ok {
-		return false, fmt.Errorf("failed to convert node's pod resource to int64")
+		return false, fmt.Errorf("failed to convert node's pod resource '%v' to int64", nodePods)
 	}
 
 	nodeEphemeralStorageQuantity, ok := nodeEphemeralStorage.AsInt64()
 	if !ok {
-
-		return false, fmt.Errorf("failed to convert node's ephemeral storage resource to int64")
+		return false, fmt.Errorf("failed to convert node's ephemeral storage resource '%v' to int64", nodeMemory)
 	}
 
 	if nodeCPUQuantity < nodeSpec.MilliCPU ||
@@ -97,76 +99,47 @@ func IsNodeCapacitySufficient(ctx context.Context, clientSet *kubernetes.Clients
 	return true, nil
 }
 
-func IsGpusVisible(ctx context.Context, clientSet *kubernetes.Clientset, resourceType string, resource *v1alpha1.ComposableResource) (bool, error) {
-	if resourceType == "DRA" {
-		resourceSliceList, err := clientSet.ResourceV1alpha3().ResourceSlices().List(ctx, metav1.ListOptions{})
-		if err != nil {
-			return false, err
-		}
-
-		for _, rs := range resourceSliceList.Items {
-			for _, device := range rs.Spec.Devices {
-				for attrName, attrValue := range device.Basic.Attributes {
-					if attrName == "uuid" && *attrValue.StringValue == resource.Status.DeviceID {
-						return true, nil
-					}
-				}
-			}
-		}
-
-		return false, nil
-	} else {
-		// TODO: When using device plugin, IsGpusVisible() needs to be modified.
-		node, err := GetNode(ctx, clientSet, resource.Spec.TargetNode)
-		if err != nil {
-			return false, err
-		}
-
-		return isGpusVisible(node), nil
-	}
-}
-
-func isGpusVisible(node *v1.Node) bool {
-	if val, exists := node.Status.Allocatable["nvidia.com/gpu"]; exists {
-		if val.IsZero() {
-			return false
-		} else {
-			return true
-		}
-	}
-
-	return false
-}
-
-func SetNodeSchedulable(ctx context.Context, clientSet *kubernetes.Clientset, request *v1alpha1.ComposableResource) (bool, error) {
-	nodeNeedsUpdate := false
-
-	node, err := GetNode(ctx, clientSet, request.Spec.TargetNode)
-	if err != nil {
+func SetNodeSchedulable(ctx context.Context, client client.Client, request *v1alpha1.ComposableResource) (bool, error) {
+	node := &corev1.Node{}
+	if err := client.Get(ctx, types.NamespacedName{Name: request.Spec.TargetNode}, node); err != nil {
 		return false, err
 	}
 
 	if node.Spec.Unschedulable {
-		nodeNeedsUpdate = true
-
-		if err := updateUnschedulableValue(ctx, clientSet, node, false); err != nil {
-			return nodeNeedsUpdate, err
+		node.Spec.Unschedulable = false
+		if err := client.Update(ctx, node); err != nil {
+			return true, err
 		}
 
-		return nodeNeedsUpdate, nil
+		return true, nil
 	}
 
-	return nodeNeedsUpdate, nil
+	return false, nil
 }
 
-func updateUnschedulableValue(ctx context.Context, clientSet *kubernetes.Clientset, node *v1.Node, desiredState bool) error {
-	node.Spec.Unschedulable = desiredState
+func GetAllNodes(ctx context.Context, client client.Client) (*corev1.NodeList, error) {
+	nodeList := &corev1.NodeList{}
+	if err := client.List(ctx, nodeList); err != nil {
+		return nil, err
+	}
 
-	return updateNode(ctx, clientSet, node)
+	return nodeList, nil
 }
 
-func updateNode(ctx context.Context, clientSet *kubernetes.Clientset, node *v1.Node) error {
-	_, err := clientSet.CoreV1().Nodes().Update(ctx, node, metav1.UpdateOptions{})
+func CheckNodeExisted(ctx context.Context, client client.Client, nodeName string) error {
+	_, err := getNode(ctx, client, nodeName)
+	if err != nil {
+		return err
+	}
 
-	return err
+	return nil
+}
+
+func getNode(ctx context.Context, client client.Client, nodeName string) (*corev1.Node, error) {
+	node := &corev1.Node{}
+	if err := client.Get(ctx, types.NamespacedName{Name: nodeName}, node); err != nil {
+		return nil, err
+	}
+
+	return node, nil
 }

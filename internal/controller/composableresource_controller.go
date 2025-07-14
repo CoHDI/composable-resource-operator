@@ -30,17 +30,16 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	crov1alpha1 "github.com/IBM/composable-resource-operator/api/v1alpha1"
 	"github.com/IBM/composable-resource-operator/internal/cdi"
-	util "github.com/IBM/composable-resource-operator/internal/utils"
+	"github.com/IBM/composable-resource-operator/internal/utils"
 )
 
 // ComposableResourceReconciler reconciles a ComposableResource object
 type ComposableResourceReconciler struct {
 	client.Client
-	ClientSet  *kubernetes.Clientset
+	Clientset  *kubernetes.Clientset
 	Scheme     *runtime.Scheme
 	RestConfig *rest.Config
 }
@@ -71,31 +70,24 @@ var (
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the ComposableResource object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.19.0/pkg/reconcile
 func (r *ComposableResourceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = log.FromContext(ctx)
-
 	composableResourceLog.Info("start reconciling", "request", req.NamespacedName)
 
 	composableResource := &crov1alpha1.ComposableResource{}
 	if err := r.Get(ctx, req.NamespacedName, composableResource); err != nil {
-		composableResourceLog.Error(err, "failed to get composableResource", "request", req.NamespacedName)
 		if k8serrors.IsNotFound(err) {
-			return doNotRequeue()
+			composableResourceLog.Error(err, "failed to get composableResource", "request", req.NamespacedName)
+			return r.doNotRequeue()
 		}
-		return requeueOnErr(err)
+		return r.requeueOnErr(err, "failed to get composableResource", "request", req.NamespacedName)
 	}
 
-	adapter, err := NewComposableResourceAdapter(nil, composableResourceLog, ctx, r.Client, r.ClientSet)
+	adapter, err := NewComposableResourceAdapter(ctx, r.Client, r.Clientset)
 	if err != nil {
-		composableResourceLog.Error(err, "failed to create ComposableResource Adapter", "request", req.NamespacedName)
-		return requeueOnErr(err)
+		return r.requeueOnErr(err, "failed to create ComposableResource Adapter", "request", req.NamespacedName)
 	}
 
 	var result ctrl.Result
@@ -103,38 +95,32 @@ func (r *ComposableResourceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	case "":
 		result, err = r.handleNoneState(ctx, composableResource)
 		if err != nil {
-			composableResourceLog.Error(err, "failed to handle None state")
-			return requeueOnErr(err)
+			return r.requeueOnErr(err, "failed to handle None state", "composableResource", composableResource.Name)
 		}
 	case "Attaching":
 		result, err = r.handleAttachingState(ctx, composableResource, adapter)
 		if err != nil {
-			composableResourceLog.Error(err, "failed to handle Attaching state")
-			return requeueOnErr(err)
+			return r.requeueOnErr(err, "failed to handle Attaching state", "composableResource", composableResource.Name)
 		}
 	case "Online":
 		result, err = r.handleOnlineState(ctx, composableResource, adapter)
 		if err != nil {
-			composableResourceLog.Error(err, "failed to handle Online state")
-			return requeueOnErr(err)
+			return r.requeueOnErr(err, "failed to handle Online state", "composableResource", composableResource.Name)
 		}
 	case "Cleaning":
 		result, err = r.handleCleaningState(ctx, composableResource)
 		if err != nil {
-			composableResourceLog.Error(err, "failed to handle Cleaning state")
-			return requeueOnErr(err)
+			return r.requeueOnErr(err, "failed to handle Cleaning state", "composableResource", composableResource.Name)
 		}
 	case "Detaching":
 		result, err = r.handleDetachingState(ctx, composableResource, adapter)
 		if err != nil {
-			composableResourceLog.Error(err, "failed to handle Detaching state")
-			return requeueOnErr(err)
+			return r.requeueOnErr(err, "failed to handle Detaching state", "composableResource", composableResource.Name)
 		}
 	case "Deleting":
 		result, err = r.handleDeletingState(ctx, composableResource)
 		if err != nil {
-			composableResourceLog.Error(err, "failed to handle Deleting state")
-			return requeueOnErr(err)
+			return r.requeueOnErr(err, "failed to handle Deleting state", "composableResource", composableResource.Name)
 		}
 	}
 
@@ -144,11 +130,10 @@ func (r *ComposableResourceReconciler) Reconcile(ctx context.Context, req ctrl.R
 func (r *ComposableResourceReconciler) handleNoneState(ctx context.Context, resource *crov1alpha1.ComposableResource) (ctrl.Result, error) {
 	composableResourceLog.Info("start handling None state", "ComposableResource", resource.Name)
 
-	if !controllerutil.ContainsFinalizer(resource, composabilityFinalizer) {
-		controllerutil.AddFinalizer(resource, composabilityFinalizer)
+	if !controllerutil.ContainsFinalizer(resource, composabilityRequestFinalizer) {
+		controllerutil.AddFinalizer(resource, composabilityRequestFinalizer)
 		if err := r.Update(ctx, resource); err != nil {
-			composableResourceLog.Error(err, "failed to update composableResource", "ComposableResource", resource.Name)
-			return requeueOnErr(err)
+			return r.requeueOnErr(err, "failed to update composableResource", "ComposableResource", resource.Name)
 		}
 	}
 
@@ -164,7 +149,7 @@ func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context,
 		return ctrl.Result{}, r.Status().Update(ctx, resource)
 	}
 
-	resourceType := os.Getenv("DEVICE_RESOURCE_TYPE")
+	deviceResourceType := os.Getenv("DEVICE_RESOURCE_TYPE")
 
 	if resource.Status.DeviceID == "" {
 		deviceID, CDIDeviceID, err := adapter.CDIProvider.AddResource(resource)
@@ -172,16 +157,15 @@ func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context,
 			if errors.Is(err, cdi.ErrWaitingDeviceAttaching) {
 				// It takes time to add a device, so wait to requeue.
 				composableResourceLog.Info("the device is being installed, please wait", "ComposableResource", resource.Name)
-				return requeueAfter(30*time.Second, nil)
+				return r.requeueAfter(30*time.Second, nil)
 			}
+
 			// Write the error message into .Status.Error to let user know.
 			resource.Status.Error = err.Error()
 			if err := r.Status().Update(ctx, resource); err != nil {
-				composableResourceLog.Error(err, "failed to update composableResource", "composableResource", resource.Name)
-				return requeueOnErr(err)
+				return r.requeueOnErr(err, "failed to update composableResource", "composableResource", resource.Name)
 			}
-
-			return requeueOnErr(err)
+			return r.requeueOnErr(err, "failed to add resource", "composableResource", resource.Name)
 		}
 
 		composableResourceLog.Info("found an available deviceID", "deviceID", deviceID, "ComposableResource", resource.Name)
@@ -190,45 +174,43 @@ func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context,
 		resource.Status.DeviceID = deviceID
 		resource.Status.CDIDeviceID = CDIDeviceID
 		if err = r.Status().Update(ctx, resource); err != nil {
-			composableResourceLog.Error(err, "failed to update composableResource", "composableResource", resource.Name)
-			return requeueOnErr(err)
-		}
-
-		if resourceType == "DEVICE_PLUGIN" {
-			if err := util.RestartDaemonset(r.ClientSet, ctx, "nvidia-gpu-operator", "nvidia-device-plugin-daemonset"); err != nil {
-				composableResourceLog.Error(err, "failed to restart nvidia-device-plugin-daemonset", "composableResource", resource.Name)
-				return requeueOnErr(err)
-			}
-			if err := util.RestartDaemonset(r.ClientSet, ctx, "nvidia-gpu-operator", "nvidia-dcgm"); err != nil {
-				composableResourceLog.Error(err, "failed to restart nvidia-dcgm", "composableResource", resource.Name)
-				return requeueOnErr(err)
-			}
-		} else if resourceType == "DRA" {
-			if err := util.RunNvidiaSmi(ctx, r.ClientSet, r.RestConfig, resource.Spec.TargetNode, resource.Status.DeviceID, resource.Spec.Model); err != nil {
-				composableResourceLog.Error(err, "failed to run nvidia-smi in nvidia-device-plugin-daemonset pod", "composableResource", resource.Name)
-				return requeueOnErr(err)
-			}
-
-			if err := util.RestartDaemonset(r.ClientSet, ctx, "nvidia-dra-driver", "nvidia-dra-driver-gpu-kubelet-plugin"); err != nil {
-				composableResourceLog.Error(err, "failed to restart nvidia-device-plugin-daemonset", "composableResource", resource.Name)
-				return requeueOnErr(err)
-			}
-		} else {
-			return requeueOnErr(fmt.Errorf("DEVICE_RESOURCE_TYPE variable not set properly"))
+			return r.requeueOnErr(err, "failed to update composableResource", "composableResource", resource.Name)
 		}
 	}
 
-	visible, err := util.IsGpusVisible(ctx, r.ClientSet, resourceType, resource)
+	if deviceResourceType == "DEVICE_PLUGIN" {
+		if err := utils.CheckNoGPULoads(ctx, r.Client, r.Clientset, r.RestConfig, resource.Spec.TargetNode, nil); err != nil {
+			composableResourceLog.Error(err, "failed to check gpu loads in TargetNode", "TargetNode", resource.Spec.TargetNode, "composableResource", resource.Name)
+		}
+
+		if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-gpu-operator", "nvidia-device-plugin-daemonset"); err != nil {
+			return r.requeueOnErr(err, "failed to restart nvidia-device-plugin-daemonset", "composableResource", resource.Name)
+		}
+		if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-gpu-operator", "nvidia-dcgm"); err != nil {
+			return r.requeueOnErr(err, "failed to restart nvidia-dcgm", "composableResource", resource.Name)
+		}
+	} else if deviceResourceType == "DRA" {
+		if err := utils.RunNvidiaSmi(ctx, r.Client, r.Clientset, r.RestConfig, resource.Spec.TargetNode); err != nil {
+			return r.requeueOnErr(err, "failed to run nvidia-smi in nvidia-device-plugin-daemonset pod", "composableResource", resource.Name)
+		}
+		if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-dra-driver", "nvidia-dra-driver-gpu-kubelet-plugin"); err != nil {
+			return r.requeueOnErr(err, "failed to restart nvidia-device-plugin-daemonset", "composableResource", resource.Name)
+		}
+	} else {
+		err := fmt.Errorf("the env variable DEVICE_RESOURCE_TYPE has an invalid value: '%s'", deviceResourceType)
+		return r.requeueOnErr(err, "failed to check the env variable DEVICE_RESOURCE_TYPE value", "composableResource", resource.Name)
+	}
+
+	visible, err := utils.CheckGPUVisible(ctx, r.Client, r.Clientset, r.RestConfig, deviceResourceType, resource)
 	if err != nil {
-		composableResourceLog.Error(err, "failed to check if the gpu has been recognized by cluster", "ComposableResource", resource.Name)
-		return requeueOnErr(err)
+		return r.requeueOnErr(err, "failed to check if the gpu has been recognized by cluster", "ComposableResource", resource.Name)
 	}
 	if visible {
 		resource.Status.State = "Online"
 		return ctrl.Result{}, r.Status().Update(ctx, resource)
 	} else {
 		composableResourceLog.Info("waiting for the cluster to recognize the newly added device", "ComposableResource", resource.Name)
-		return requeueAfter(10*time.Second, nil)
+		return r.requeueAfter(30*time.Second, nil)
 	}
 }
 
@@ -243,14 +225,12 @@ func (r *ComposableResourceReconciler) handleOnlineState(ctx context.Context, re
 	// Check if there are any error messages in CDI system for this ComposableResource.
 	if err := adapter.CDIProvider.CheckResource(resource); err != nil {
 		resource.Status.Error = err.Error()
-
 		if err := r.Status().Update(ctx, resource); err != nil {
-			composableResourceLog.Error(err, "failed to update ComposableResource", "ComposableResource", resource.Name)
-			return requeueOnErr(err)
+			return r.requeueOnErr(err, "failed to update ComposableResource", "ComposableResource", resource.Name)
 		}
 	}
 
-	return requeueAfter(10*time.Second, nil)
+	return r.requeueAfter(30*time.Second, nil)
 }
 
 func (r *ComposableResourceReconciler) handleCleaningState(ctx context.Context, resource *crov1alpha1.ComposableResource) (ctrl.Result, error) {
@@ -268,85 +248,79 @@ func (r *ComposableResourceReconciler) handleCleaningState(ctx context.Context, 
 func (r *ComposableResourceReconciler) handleDetachingState(ctx context.Context, resource *crov1alpha1.ComposableResource, adapter *ComposableResourceAdapter) (ctrl.Result, error) {
 	composableResourceLog.Info("start handling Detaching state", "ComposableResource", resource.Name)
 
-	resourceType := os.Getenv("DEVICE_RESOURCE_TYPE")
-	if resourceType != "DEVICE_PLUGIN" && resourceType != "DRA" {
-		err := fmt.Errorf("DEVICE_RESOURCE_TYPE variable not set properly, now is '%s'", resourceType)
-		composableResourceLog.Error(err, "failed to read DEVICE_RESOURCE_TYPE", "composableResource", resource.Name)
-		return requeueOnErr(err)
+	deviceResourceType := os.Getenv("DEVICE_RESOURCE_TYPE")
+	if deviceResourceType != "DEVICE_PLUGIN" && deviceResourceType != "DRA" {
+		err := fmt.Errorf("the env variable DEVICE_RESOURCE_TYPE has an invalid value: '%s'", deviceResourceType)
+		return r.requeueOnErr(err, "failed to check the env variable DEVICE_RESOURCE_TYPE value", "composableResource", resource.Name)
 	}
 
 	if resource.Status.DeviceID != "" {
 		// Make sure there is no load on the target GPU.
 		if !resource.Spec.ForceDetach {
-			var hasLoads bool
 			var err error
-			if resourceType == "DEVICE_PLUGIN" {
-				hasLoads, err = util.IfGPUHasLoads(ctx, r.ClientSet, r.RestConfig, resource.Spec.TargetNode, nil)
-			} else if resourceType == "DRA" {
-				hasLoads, err = util.IfGPUHasLoads(ctx, r.ClientSet, r.RestConfig, resource.Spec.TargetNode, &resource.Status.DeviceID)
+			if deviceResourceType == "DEVICE_PLUGIN" {
+				// When using DEVICE_PLUGIN, ensure that all GPUs on the target GPU's Node are not under load.
+				err = utils.CheckNoGPULoads(ctx, r.Client, r.Clientset, r.RestConfig, resource.Spec.TargetNode, nil)
+			} else {
+				// When using DRA, only the target GPU needs to be free from load.
+				err = utils.CheckNoGPULoads(ctx, r.Client, r.Clientset, r.RestConfig, resource.Spec.TargetNode, &resource.Status.DeviceID)
 			}
 
 			if err != nil {
-				composableResourceLog.Error(err, "failed to check gpu loads in TargetNode", "TargetNode", resource.Spec.TargetNode, "composableResource", resource.Name)
-				return requeueOnErr(err)
-			}
-
-			if hasLoads {
-				err := fmt.Errorf("there are gpu loads on the target, please check")
-				composableResourceLog.Error(err, "failed to detach device", "TargetNode", resource.Spec.TargetNode, "ComposableResource", resource.Name)
-				return requeueOnErr(err)
+				return r.requeueOnErr(err, "failed to check gpu loads in TargetNode", "TargetNode", resource.Spec.TargetNode, "composableResource", resource.Name)
 			}
 		}
 
-		if err := util.CreateGPUTaintRule(ctx, r.Client, resource); err != nil {
-			composableResourceLog.Error(err, "failed to create DeviceTaintRule", "composableResource", resource.Name)
-			return requeueOnErr(err)
+		// Create a DeviceTaintRule to block the GPU from being re-scheduled.
+		if err := utils.CreateGPUTaintRule(ctx, r.Client, resource); err != nil {
+			return r.requeueOnErr(err, "failed to create DeviceTaintRule", "composableResource", resource.Name)
 		}
 
 		// Use nvidia-smi to remove gpu from the target node.
-		if err := util.DrainGPU(ctx, r.ClientSet, r.RestConfig, resource.Spec.TargetNode, resource.Status.DeviceID, resourceType); err != nil {
-			composableResourceLog.Error(err, "failed to drain target gpu", "deviceID", resource.Status.DeviceID, "composableResource", resource.Name)
-			return requeueOnErr(err)
+		if err := utils.DrainGPU(ctx, r.Client, r.Clientset, r.RestConfig, resource.Spec.TargetNode, resource.Status.DeviceID, deviceResourceType); err != nil {
+			return r.requeueOnErr(err, "failed to drain target gpu", "deviceID", resource.Status.DeviceID, "composableResource", resource.Name)
 		}
 
 		if err := adapter.CDIProvider.RemoveResource(resource); err != nil {
 			if errors.Is(err, cdi.ErrWaitingDeviceDetaching) {
 				//It takes time to remove a device, so wait to requeue.
 				composableResourceLog.Info("the device is being removed, please wait", "ComposableResource", resource.Name)
-				return requeueAfter(30*time.Second, nil)
+				return r.requeueAfter(30*time.Second, nil)
 			}
-			return requeueOnErr(err)
+
+			// Write the error message into .Status.Error to let user know.
+			resource.Status.Error = err.Error()
+			if err := r.Status().Update(ctx, resource); err != nil {
+				return r.requeueOnErr(err, "failed to update composableResource", "composableResource", resource.Name)
+			}
+			return r.requeueOnErr(err, "failed to remove resource", "composableResource", resource.Name)
 		}
 
 		composableResourceLog.Info("the device has been removed", "ComposableResource", resource.Name)
 
-		if resourceType == "DEVICE_PLUGIN" {
-			if err := util.RestartDaemonset(r.ClientSet, ctx, "nvidia-gpu-operator", "nvidia-device-plugin-daemonset"); err != nil {
-				composableResourceLog.Error(err, "failed to restart nvidia-device-plugin-daemonset", "composableResource", resource.Name)
-				return requeueOnErr(err)
+		if deviceResourceType == "DEVICE_PLUGIN" {
+			if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-gpu-operator", "nvidia-device-plugin-daemonset"); err != nil {
+				return r.requeueOnErr(err, "failed to restart nvidia-device-plugin-daemonset", "composableResource", resource.Name)
 			}
-			if err := util.RestartDaemonset(r.ClientSet, ctx, "nvidia-gpu-operator", "nvidia-dcgm"); err != nil {
-				composableResourceLog.Error(err, "failed to restart nvidia-dcgm", "composableResource", resource.Name)
-				return requeueOnErr(err)
+			if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-gpu-operator", "nvidia-dcgm"); err != nil {
+				return r.requeueOnErr(err, "failed to restart nvidia-dcgm", "composableResource", resource.Name)
 			}
-		} else if resourceType == "DRA" {
+		} else {
 			// TODO: need to confirm the DRA's namespace.
-			if err := util.RestartDaemonset(r.ClientSet, ctx, "nvidia-dra-driver", "nvidia-dra-driver-gpu-kubelet-plugin"); err != nil {
-				composableResourceLog.Error(err, "failed to restart nvidia-device-plugin-daemonset", "composableResource", resource.Name)
-				return requeueOnErr(err)
+			if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-dra-driver", "nvidia-dra-driver-gpu-kubelet-plugin"); err != nil {
+				return r.requeueOnErr(err, "failed to restart nvidia-device-plugin-daemonset", "composableResource", resource.Name)
 			}
 		}
 
-		if err := util.DeleteGPUTaintRule(ctx, r.Client, resource); err != nil {
-			composableResourceLog.Error(err, "failed to delete DeviceTaintRule", "composableResource", resource.Name)
-			return requeueOnErr(err)
+		if err := utils.DeleteGPUTaintRule(ctx, r.Client, resource); err != nil {
+			return r.requeueOnErr(err, "failed to delete DeviceTaintRule", "composableResource", resource.Name)
 		}
 
+		resource.Status.Error = ""
 		resource.Status.DeviceID = ""
 		resource.Status.CDIDeviceID = ""
 		if err := r.Status().Update(ctx, resource); err != nil {
-			composableResourceLog.Error(err, "failed to update composableResource", "composableResource", resource.Name)
-			return requeueOnErr(err)
+			return r.requeueOnErr(err, "failed to update composableResource", "composableResource", resource.Name)
 		}
 	}
 
@@ -357,24 +331,35 @@ func (r *ComposableResourceReconciler) handleDetachingState(ctx context.Context,
 func (r *ComposableResourceReconciler) handleDeletingState(ctx context.Context, resource *crov1alpha1.ComposableResource) (ctrl.Result, error) {
 	composableResourceLog.Info("start handling Deleting state", "ComposableResource", resource.Name)
 
-	needScheduleUpdate, err := util.SetNodeSchedulable(ctx, r.ClientSet, resource)
+	needScheduleUpdate, err := utils.SetNodeSchedulable(ctx, r.Client, resource)
 	if err != nil {
-		composableResourceLog.Error(err, "failed to set node schedulable", "composableResource", resource.Name)
-		return requeueOnErr(err)
+		return r.requeueOnErr(err, "failed to set node schedulable", "composableResource", resource.Name)
 	}
 	if needScheduleUpdate {
-		return requeueAfter(10*time.Second, nil)
+		return r.requeueAfter(30*time.Second, nil)
 	}
 
-	if controllerutil.ContainsFinalizer(resource, composabilityFinalizer) {
-		controllerutil.RemoveFinalizer(resource, composabilityFinalizer)
+	if controllerutil.ContainsFinalizer(resource, composabilityRequestFinalizer) {
+		controllerutil.RemoveFinalizer(resource, composabilityRequestFinalizer)
 	}
 
 	if err := r.Update(ctx, resource); err != nil {
-		composableResourceLog.Error(err, "failed to update composableResource", "composableResource", resource.Name)
-		return requeueOnErr(err)
+		return r.requeueOnErr(err, "failed to update composableResource", "composableResource", resource.Name)
 	}
 
+	return ctrl.Result{}, nil
+}
+
+func (r *ComposableResourceReconciler) requeueOnErr(err error, msg string, keysAndValues ...any) (ctrl.Result, error) {
+	composableResourceLog.Error(err, msg, keysAndValues...)
+	return ctrl.Result{}, err
+}
+
+func (r *ComposableResourceReconciler) requeueAfter(duration time.Duration, err error) (ctrl.Result, error) {
+	return ctrl.Result{RequeueAfter: duration}, err
+}
+
+func (r *ComposableResourceReconciler) doNotRequeue() (ctrl.Result, error) {
 	return ctrl.Result{}, nil
 }
 

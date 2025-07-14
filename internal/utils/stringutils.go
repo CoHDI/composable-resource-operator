@@ -1,21 +1,19 @@
 package utils
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
 	"github.com/google/uuid"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-func GenerateComposableResourceName(ctx context.Context, cl client.Client, model string, typeName string) string {
-	var candidateName string
+func GenerateComposableResourceName(typeName string) string {
+	var composableResourceName string
 
-	candidateName = fmt.Sprintf("%s-%s", typeName, uuid.New().String())
-	candidateName = strings.ToLower(candidateName)
+	composableResourceName = fmt.Sprintf("%s-%s", typeName, uuid.New().String())
+	composableResourceName = strings.ToLower(composableResourceName)
 
-	return candidateName
+	return composableResourceName
 }
 
 func ContainsString(slice []string, s string) bool {

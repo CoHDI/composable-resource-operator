@@ -56,14 +56,30 @@ var (
 	worker7Name = "worker-7"
 )
 var (
-	composableResource0Name = "gpu-nvidia-a100-pcie-80gb-00000000-temp-uuid-0000-000000000000"
-	composableResource1Name = "gpu-nvidia-a100-pcie-80gb-00000000-temp-uuid-0000-000000000001"
-	composableResource2Name = "gpu-nvidia-a100-pcie-80gb-00000000-temp-uuid-0000-000000000002"
-	composableResource3Name = "gpu-nvidia-a100-pcie-80gb-00000000-temp-uuid-0000-000000000003"
-	composableResource4Name = "gpu-nvidia-a100-pcie-80gb-00000000-temp-uuid-0000-000000000004"
-	composableResource5Name = "gpu-nvidia-a100-pcie-80gb-00000000-temp-uuid-0000-000000000005"
-	composableResource6Name = "gpu-nvidia-a100-pcie-80gb-00000000-temp-uuid-0000-000000000006"
+	composableResource0Name = "gpu-00000000-temp-uuid-0000-000000000000"
+	composableResource1Name = "gpu-00000000-temp-uuid-0000-000000000001"
+	composableResource2Name = "gpu-00000000-temp-uuid-0000-000000000002"
+	composableResource3Name = "gpu-00000000-temp-uuid-0000-000000000003"
+	composableResource4Name = "gpu-00000000-temp-uuid-0000-000000000004"
+	composableResource5Name = "gpu-00000000-temp-uuid-0000-000000000005"
+	composableResource6Name = "gpu-00000000-temp-uuid-0000-000000000006"
 )
+
+type myStatusWriter struct {
+	client.StatusWriter
+	mockStatusUpdate func(originalUpdate func(client.Object, ...client.SubResourceUpdateOption) error, ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error
+}
+
+func (m *myStatusWriter) Update(ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+	if m.mockStatusUpdate != nil {
+		original := func(o client.Object, opt ...client.SubResourceUpdateOption) error {
+			return m.StatusWriter.Update(ctx, o, opt...)
+		}
+
+		return m.mockStatusUpdate(original, ctx, obj, opts...)
+	}
+	return m.StatusWriter.Update(ctx, obj, opts...)
+}
 
 type MyClient struct {
 	client.Client
@@ -86,27 +102,11 @@ func (m *MyClient) Update(ctx context.Context, obj client.Object, opts ...client
 	return m.Client.Update(ctx, obj, opts...)
 }
 
-type myStatusWriter struct {
-	client.StatusWriter
-	mockStatusUpdate func(originalUpdate func(client.Object, ...client.SubResourceUpdateOption) error, ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error
-}
-
 func (m *MyClient) Status() client.StatusWriter {
 	return &myStatusWriter{
 		StatusWriter:     m.Client.Status(),
 		mockStatusUpdate: m.MockStatusUpdate,
 	}
-}
-
-func (m *myStatusWriter) Update(ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error {
-	if m.mockStatusUpdate != nil {
-		original := func(o client.Object, opt ...client.SubResourceUpdateOption) error {
-			return m.StatusWriter.Update(ctx, o, opt...)
-		}
-
-		return m.mockStatusUpdate(original, ctx, obj, opts...)
-	}
-	return m.StatusWriter.Update(ctx, obj, opts...)
 }
 
 type MockExecutor struct {

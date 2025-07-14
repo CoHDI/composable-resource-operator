@@ -63,13 +63,13 @@ func (f *FTIClient) AddResource(instance *v1alpha1.ComposableResource) (deviceID
 
 	machineID, err := f.getNodeMachineID(instance.Spec.TargetNode)
 	if err != nil {
-		clientLog.Error(err, "failed to get node MachineID", "ComposableResource", instance.Name)
+		clientLog.Error(err, "failed to get node machineUUID from cluster", "ComposableResource", instance.Name)
 		return "", "", err
 	}
 
 	token, err := f.token.GetToken()
 	if err != nil {
-		clientLog.Error(err, "failed to get token", "ComposableResource", instance.Name)
+		clientLog.Error(err, "failed to get authentication token for CM scaleup", "ComposableResource", instance.Name)
 		return "", "", err
 	}
 
@@ -101,16 +101,12 @@ func (f *FTIClient) AddResource(instance *v1alpha1.ComposableResource) (deviceID
 			},
 		},
 	}
-	jsonData, err := json.Marshal(body)
-	if err != nil {
-		clientLog.Error(err, "failed to marshal scaleUp Request Body", "ComposableResource", instance.Name)
-		return "", "", err
-	}
+	jsonData, _ := json.Marshal(body)
 
 	pathPrefix := fmt.Sprintf("fabric_manager/api/v1/machines/%s/update", machineID)
 	req, err := http.NewRequest("PATCH", "https://"+f.compositionServiceEndpoint+pathPrefix, bytes.NewBuffer(jsonData))
 	if err != nil {
-		clientLog.Error(err, "failed to create new request", "ComposableResource", instance.Name)
+		clientLog.Error(err, "failed to create HTTP request for FM scaleup", "ComposableResource", instance.Name)
 		return "", "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -122,56 +118,53 @@ func (f *FTIClient) AddResource(instance *v1alpha1.ComposableResource) (deviceID
 	client := oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(token))
 	response, err := client.Do(req)
 	if err != nil {
-		clientLog.Error(err, "failed to send request", "ComposableResource", instance.Name)
+		clientLog.Error(err, "failed to send scaleup request to FM", "ComposableResource", instance.Name)
 		return "", "", err
 	}
 	defer response.Body.Close()
 
 	data, err := io.ReadAll(response.Body)
 	if err != nil {
-		clientLog.Error(err, "failed to read response body", "ComposableResource", instance.Name)
+		clientLog.Error(err, "failed to read scaleup response body from FM", "ComposableResource", instance.Name)
 		return "", "", err
 	}
 
 	if response.StatusCode != http.StatusOK {
 		errBody := &ftifmapi.ErrorBody{}
 		if err := json.Unmarshal(data, errBody); err != nil {
-			clientLog.Error(err, "failed to unmarshal errBody Response", "ComposableResource", instance.Name)
-			return "", "", fmt.Errorf("failed to read response data into errorBody. Original error: %w", err)
+			clientLog.Error(err, "failed to unmarshal FM scaleup error response body into errBody", "ComposableResource", instance.Name)
+			return "", "", fmt.Errorf("failed to unmarshal FM scaleup error response body into errBody. Original error: %w", err)
 		}
 
-		err = fmt.Errorf("fm returned code: %s, error message: %s", errBody.Code, errBody.Message)
-		clientLog.Error(err, "failed to process request", "ComposableResource", instance.Name)
+		err = fmt.Errorf("failed to process FM scaleup request. FM returned code: '%s', error message: '%s'", errBody.Code, errBody.Message)
+		clientLog.Error(err, "failed to process FM scaleup request", "ComposableResource", instance.Name)
 		return "", "", err
 	}
 
 	scaleUpResponse := &ftifmapi.ScaleUpResponse{}
 	if err := json.Unmarshal(data, scaleUpResponse); err != nil {
-		clientLog.Error(err, "failed to unmarshal scaleUp Response", "ComposableResource", instance.Name)
-		return "", "", fmt.Errorf("failed to read response data into MachineData. Original error: %w", err)
+		clientLog.Error(err, "failed to unmarshal FM scaleup response body into scaleUpResponse", "ComposableResource", instance.Name)
+		return "", "", fmt.Errorf("failed to unmarshal FM scaleup response body into scaleUpResponse. Original error: %w", err)
 	}
 
 	if len(scaleUpResponse.Data.Machines) > 0 && len(scaleUpResponse.Data.Machines[0].Resources) > 0 && scaleUpResponse.Data.Machines[0].Resources[0].Type == instance.Spec.Type {
 		resource := scaleUpResponse.Data.Machines[0].Resources[0]
 
-		if resource.OptionStatus != "0" && resource.OptionStatus != "1" {
-			if resource.OptionStatus == "2" {
-				err := fmt.Errorf("the attached device called by %s is in Critical state", instance.Name)
-				clientLog.Error(err, "failed to attach device", "ComposableResource", instance.Name)
-				return "", "", err
-			} else {
-				err := fmt.Errorf("the attached device called by %s is in unknown state: %s", instance.Name, resource.OptionStatus)
-				clientLog.Error(err, "failed to attach device", "ComposableResource", instance.Name)
-				return "", "", err
-			}
-		}
-
 		for _, spec := range resource.Spec.Condition {
 			if spec.Column == "model" && spec.Operator == "eq" && spec.Value == instance.Spec.Model {
-				if resource.OptionStatus == "0" || resource.OptionStatus == "1" {
+				if resource.OptionStatus == "0" {
 					return resource.ResourceUUID, resource.ResourceUUID, nil
+				} else if resource.OptionStatus == "1" {
+					clientLog.Info("the FM attached device called is in Warning state in FM", "ComposableResource", instance.Name)
+					return resource.ResourceUUID, resource.ResourceUUID, nil
+				} else if resource.OptionStatus == "2" {
+					err := fmt.Errorf("the FM attached device called by %s is in Critical state in FM", instance.Name)
+					clientLog.Error(err, "failed to attach device", "ComposableResource", instance.Name)
+					return "", "", err
 				} else {
-
+					err := fmt.Errorf("the FM attached device called by %s is in unknown state '%s' in FM", instance.Name, resource.OptionStatus)
+					clientLog.Error(err, "failed to attach device", "ComposableResource", instance.Name)
+					return "", "", err
 				}
 			}
 		}
@@ -185,13 +178,13 @@ func (f *FTIClient) RemoveResource(instance *v1alpha1.ComposableResource) error 
 
 	machineID, err := f.getNodeMachineID(instance.Spec.TargetNode)
 	if err != nil {
-		clientLog.Error(err, "failed to get node MachineID", "ComposableResource", instance.Name)
+		clientLog.Error(err, "failed to get node MachineID from cluster", "ComposableResource", instance.Name)
 		return err
 	}
 
 	token, err := f.token.GetToken()
 	if err != nil {
-		clientLog.Error(err, "failed to get token", "ComposableResource", instance.Name)
+		clientLog.Error(err, "failed to get authentication token for FM scaledown", "ComposableResource", instance.Name)
 		return err
 	}
 
@@ -215,16 +208,12 @@ func (f *FTIClient) RemoveResource(instance *v1alpha1.ComposableResource) error 
 			},
 		},
 	}
-	jsonData, err := json.Marshal(body)
-	if err != nil {
-		clientLog.Error(err, "failed to marshal scaleUp Request Body", "ComposableResource", instance.Name)
-		return err
-	}
+	jsonData, _ := json.Marshal(body)
 
 	pathPrefix := fmt.Sprintf("fabric_manager/api/v1/machines/%s/update", machineID)
 	req, err := http.NewRequest("DELETE", "https://"+f.compositionServiceEndpoint+pathPrefix, bytes.NewBuffer(jsonData))
 	if err != nil {
-		clientLog.Error(err, "failed to create new request", "ComposableResource", instance.Name)
+		clientLog.Error(err, "failed to create new HTTP request for FM scaledown", "ComposableResource", instance.Name)
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -236,7 +225,7 @@ func (f *FTIClient) RemoveResource(instance *v1alpha1.ComposableResource) error 
 	client := oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(token))
 	response, err := client.Do(req)
 	if err != nil {
-		clientLog.Error(err, "failed to send request", "ComposableResource", instance.Name)
+		clientLog.Error(err, "failed to send scaledown request to FM", "ComposableResource", instance.Name)
 		return err
 	}
 	defer response.Body.Close()
@@ -244,18 +233,18 @@ func (f *FTIClient) RemoveResource(instance *v1alpha1.ComposableResource) error 
 	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusNoContent {
 		data, err := io.ReadAll(response.Body)
 		if err != nil {
-			clientLog.Error(err, "failed to read response body", "ComposableResource", instance.Name)
+			clientLog.Error(err, "failed to read scaledown response body from FM", "ComposableResource", instance.Name)
 			return err
 		}
 
 		errBody := &ftifmapi.ErrorBody{}
 		if err := json.Unmarshal(data, errBody); err != nil {
-			clientLog.Error(err, "failed to unmarshal scaleUp Response", "ComposableResource", instance.Name)
-			return fmt.Errorf("failed to read response data into errorBody. Original error: %w", err)
+			clientLog.Error(err, "failed to unmarshal scaledown error response body into errBody", "ComposableResource", instance.Name)
+			return fmt.Errorf("failed to unmarshal scaledown error response body into errBody. Original error: %w", err)
 		}
 
-		err = fmt.Errorf("fm returned code: %s, error message: %s", errBody.Code, errBody.Message)
-		clientLog.Error(err, "failed to process request", "ComposableResource", instance.Name)
+		err = fmt.Errorf("failed to process scaledown request. FM returned code: %s, error message: %s", errBody.Code, errBody.Message)
+		clientLog.Error(err, "failed to process scaledown request", "ComposableResource", instance.Name)
 		return err
 	}
 
@@ -278,7 +267,7 @@ func (f *FTIClient) CheckResource(instance *v1alpha1.ComposableResource) error {
 		return err
 	}
 
-	// Check whether the device associated with this CR exists in FM.
+	// Check whether the device associated with this ComposableResource exists in FM.
 	for _, resource := range machineData.Machines[0].Resources {
 		if resource.Type != instance.Spec.Type {
 			continue
@@ -294,11 +283,11 @@ func (f *FTIClient) CheckResource(instance *v1alpha1.ComposableResource) error {
 					// The target device exists and has no error, return OK.
 					return nil
 				} else if resource.OptionStatus == "1" {
-					return fmt.Errorf("the target gpu '%s' is in Warning state", instance.Status.DeviceID)
+					return fmt.Errorf("the target gpu '%s' is showing a Warning status in FM", instance.Status.DeviceID)
 				} else if resource.OptionStatus == "2" {
-					return fmt.Errorf("the target gpu '%s' is in Critical state", instance.Status.DeviceID)
+					return fmt.Errorf("the target gpu '%s' is showing a Critical status in FM", instance.Status.DeviceID)
 				} else {
-					return fmt.Errorf("the target gpu '%s' has unknown state", instance.Status.DeviceID)
+					return fmt.Errorf("the target gpu '%s' has unknown status '%s' in FM", instance.Status.DeviceID, resource.OptionStatus)
 				}
 			}
 		}
@@ -319,7 +308,7 @@ func (f *FTIClient) getNodeMachineID(nodeName string) (string, error) {
 		machineInfo := node.GetAnnotations()["machine.openshift.io/machine"]
 		machineInfoParts := strings.Split(machineInfo, "/")
 		if len(machineInfoParts) != 2 {
-			return "", fmt.Errorf("invalid format: expected 'namespace/machineName', now is '%s'", machineInfo)
+			return "", fmt.Errorf("failed to get annotation 'machine.openshift.io/machine' from Node %s, now is '%s'", nodeName, machineInfo)
 		}
 
 		machine := &machinev1beta1.Metal3Machine{}
@@ -330,12 +319,16 @@ func (f *FTIClient) getNodeMachineID(nodeName string) (string, error) {
 		bmhInfo := machine.GetAnnotations()["metal3.io/BareMetalHost"]
 		bmhInfoParts := strings.Split(bmhInfo, "/")
 		if len(bmhInfoParts) != 2 {
-			return "", fmt.Errorf("invalid format: expected 'namespace/BMHName', now is '%s'", bmhInfo)
+			return "", fmt.Errorf("failed to get annotation 'metal3.io/BareMetalHost' from Machine %s, now is '%s'", machine.Name, bmhInfo)
 		}
 
 		bmh := &metal3v1alpha1.BareMetalHost{}
 		if err := f.client.Get(f.ctx, client.ObjectKey{Namespace: bmhInfoParts[0], Name: bmhInfoParts[1]}, bmh); err != nil {
 			return "", err
+		}
+
+		if bmh.GetAnnotations() == nil || bmh.GetAnnotations()["cluster-manager.cdi.io/machine"] == "" {
+			return "", fmt.Errorf("failed to get annotation 'cluster-manager.cdi.io/machine' from BareMetalHost %s, now is '%s'", bmh.Name, bmh.GetAnnotations()["cluster-manager.cdi.io/machine"])
 		}
 
 		return bmh.GetAnnotations()["cluster-manager.cdi.io/machine"], nil
@@ -387,16 +380,16 @@ func (f *FTIClient) getMachineInfo(machineID string) (*ftifmapi.GetMachineData, 
 	if response.StatusCode != http.StatusOK {
 		errBody := &ftifmapi.ErrorBody{}
 		if err := json.Unmarshal(body, errBody); err != nil {
-			return nil, fmt.Errorf("failed to read response data into errorBody. Original error: %w", err)
+			return nil, fmt.Errorf("failed to unmarshal FM get error response body into errBody. Original error: %w", err)
 		}
 
-		err = fmt.Errorf("fm return code: %s, error message: %s", errBody.Code, errBody.Message)
+		err = fmt.Errorf("failed to process FM get request. FM return code: '%s', error message: '%s'", errBody.Code, errBody.Message)
 		return nil, err
 	}
 
 	machineData := &ftifmapi.GetMachineResponse{}
 	if err := json.Unmarshal(body, machineData); err != nil {
-		return nil, fmt.Errorf("failed to read response body into machineData: %v", err)
+		return nil, fmt.Errorf("failed to unmarshal FM get machine response body into machineData: %w", err)
 	}
 
 	return &machineData.Data, nil

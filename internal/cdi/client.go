@@ -7,10 +7,10 @@ import (
 )
 
 type CdiProvider interface {
-	AddResource(instance *v1alpha1.ComposableResource) (deviceID, CDIDeviceID string, err error)
+	AddResource(instance *v1alpha1.ComposableResource) (deviceID string, CDIDeviceID string, err error)
 	RemoveResource(instance *v1alpha1.ComposableResource) error
 	CheckResource(instance *v1alpha1.ComposableResource) error
 }
 
-var ErrWaitingDeviceAttaching = errors.New("device is attaching to cluster")
-var ErrWaitingDeviceDetaching = errors.New("device is detaching to cluster")
+var ErrWaitingDeviceAttaching = errors.New("device is attaching to the cluster")
+var ErrWaitingDeviceDetaching = errors.New("device is detaching from the cluster")
