@@ -652,10 +652,22 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 			RestConfig: cfg,
 		}
 
-		Expect(k8sClient.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "credentials-namespace"}})).To(Succeed())
-		Expect(k8sClient.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "openshift-machine-api"}})).To(Succeed())
-		Expect(k8sClient.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "nvidia-gpu-operator"}})).To(Succeed())
-		Expect(k8sClient.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "nvidia-dra-driver"}})).To(Succeed())
+		namespacesToCreate := []string{
+			"credentials-namespace",
+			"openshift-machine-api",
+			"nvidia-gpu-operator",
+			"nvidia-dra-driver",
+		}
+		for _, nsName := range namespacesToCreate {
+			ns := &corev1.Namespace{}
+			if err := k8sClient.Get(ctx, types.NamespacedName{Name: nsName}, ns); err != nil {
+				if client.IgnoreNotFound(err) != nil {
+					Expect(err).NotTo(HaveOccurred())
+				}
+				// Namespace does not exist, create it.
+				Expect(k8sClient.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: nsName}})).To(Succeed())
+			}
+		}
 
 		testTLSServer := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			switch r.URL.Path {

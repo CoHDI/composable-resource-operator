@@ -130,6 +130,14 @@ func (r *ComposableResourceReconciler) Reconcile(ctx context.Context, req ctrl.R
 func (r *ComposableResourceReconciler) handleNoneState(ctx context.Context, resource *crov1alpha1.ComposableResource) (ctrl.Result, error) {
 	composableResourceLog.Info("start handling None state", "ComposableResource", resource.Name)
 
+	if deviceID, ok := resource.Labels["cohdi.io/ready-to-detach-device-uuid"]; ok && deviceID != "" {
+		composableResourceLog.Info("detected ready-to-detach-device-uuid label, entering Detaching state", "ComposableResource", resource.Name, "deviceID", deviceID)
+		resource.Status.DeviceID = deviceID
+		resource.Status.CDIDeviceID = deviceID
+		resource.Status.State = "Detaching"
+		return ctrl.Result{}, r.Status().Update(ctx, resource)
+	}
+
 	if !controllerutil.ContainsFinalizer(resource, composabilityRequestFinalizer) {
 		controllerutil.AddFinalizer(resource, composabilityRequestFinalizer)
 		if err := r.Update(ctx, resource); err != nil {
@@ -144,7 +152,7 @@ func (r *ComposableResourceReconciler) handleNoneState(ctx context.Context, reso
 func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context, resource *crov1alpha1.ComposableResource, adapter *ComposableResourceAdapter) (ctrl.Result, error) {
 	composableResourceLog.Info("start handling Attaching state", "ComposableResource", resource.Name)
 
-	if resource.DeletionTimestamp != nil && (resource.Status.DeviceID != "" || resource.Status.Error != "") {
+	if resource.DeletionTimestamp != nil {
 		resource.Status.State = "Cleaning"
 		return ctrl.Result{}, r.Status().Update(ctx, resource)
 	}

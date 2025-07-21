@@ -170,6 +170,15 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err = (&controller.UpstreamSyncerReconciler{
+		Client:    mgr.GetClient(),
+		ClientSet: clientset,
+		Scheme:    mgr.GetScheme(),
+	}).SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to create controller", "controller", "UpstreamSyncer")
+		os.Exit(1)
+	}
+
 	if os.Getenv("ENABLE_WEBHOOKS") != "false" {
 		if err = webhookcrov1alpha1.SetupWebhookWithManager(mgr); err != nil {
 			setupLog.Error(err, "unable to create webhook", "webhook", "ComposabilityRequest")

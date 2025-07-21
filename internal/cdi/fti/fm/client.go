@@ -20,6 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/IBM/composable-resource-operator/api/v1alpha1"
+	"github.com/IBM/composable-resource-operator/internal/cdi"
 	"github.com/IBM/composable-resource-operator/internal/cdi/fti"
 	ftifmapi "github.com/IBM/composable-resource-operator/internal/cdi/fti/fm/api"
 )
@@ -296,6 +297,51 @@ func (f *FTIClient) CheckResource(instance *v1alpha1.ComposableResource) error {
 	err = fmt.Errorf("the target device '%s' cannot be found in CDI system", instance.Status.DeviceID)
 	clientLog.Error(err, "failed to search device", "ComposableResource", instance.Name)
 	return err
+}
+
+func (f *FTIClient) GetResources() (deviceInfoList []cdi.DeviceInfo, err error) {
+	clientLog.Info("start getting resources")
+
+	nodeList := &corev1.NodeList{}
+	if err := f.client.List(f.ctx, nodeList); err != nil {
+		clientLog.Error(err, "failed to list nodes")
+		return nil, err
+	}
+
+	deviceInfoList = []cdi.DeviceInfo{}
+
+	for _, node := range nodeList.Items {
+		machineID, err := f.getNodeMachineID(node.Name)
+		if err != nil {
+			clientLog.Error(err, "failed to get machineID for cluster", "node", node.Name)
+			continue
+		}
+
+		machineData, err := f.getMachineInfo(machineID)
+		if err != nil {
+			clientLog.Error(err, "failed to get machineInfo from FM", "machineID", machineID)
+			continue
+		}
+
+		if len(machineData.Machines) == 0 {
+			continue
+		}
+		for _, resource := range machineData.Machines[0].Resources {
+			if resource.Type != "gpu" {
+				continue
+			}
+
+			deviceInfoList = append(deviceInfoList, cdi.DeviceInfo{
+				NodeName:    node.Name,
+				MachineUUID: machineID,
+				DeviceType:  resource.Type,
+				DeviceID:    resource.ResourceUUID,
+				CDIDeviceID: resource.ResourceUUID,
+			})
+		}
+	}
+
+	return deviceInfoList, nil
 }
 
 func (f *FTIClient) getNodeMachineID(nodeName string) (string, error) {

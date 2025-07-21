@@ -285,6 +285,50 @@ func (f *FTIClient) CheckResource(instance *v1alpha1.ComposableResource) error {
 	return err
 }
 
+func (f *FTIClient) GetResources() (deviceInfoList []cdi.DeviceInfo, err error) {
+	clientLog.Info("start getting resources")
+
+	nodeList := &corev1.NodeList{}
+	if err := f.client.List(f.ctx, nodeList); err != nil {
+		clientLog.Error(err, "failed to list nodes")
+		return nil, err
+	}
+
+	deviceInfoList = []cdi.DeviceInfo{}
+
+	for _, node := range nodeList.Items {
+		machineID, err := f.getNodeMachineID(node.Name)
+		if err != nil {
+			clientLog.Error(err, "failed to get machineID for cluster", "node", node.Name)
+			return nil, err
+		}
+
+		machineData, err := f.getMachineInfo(machineID)
+		if err != nil {
+			clientLog.Error(err, "failed to get machineInfo from CM", "machineID", machineID)
+			return nil, err
+		}
+
+		for _, resourceSpec := range machineData.Cluster.Machine.ResourceSpecs {
+			if resourceSpec.Type != "gpu" {
+				continue
+			}
+
+			for _, device := range resourceSpec.Devices {
+				deviceInfoList = append(deviceInfoList, cdi.DeviceInfo{
+					NodeName:    node.Name,
+					MachineUUID: machineID,
+					DeviceType:  resourceSpec.Type,
+					DeviceID:    device.DeviceUUID,
+					CDIDeviceID: device.DeviceUUID,
+				})
+			}
+		}
+	}
+
+	return deviceInfoList, nil
+}
+
 func (f *FTIClient) getNodeMachineID(nodeName string) (string, error) {
 	node := &corev1.Node{}
 	if err := f.client.Get(f.ctx, client.ObjectKey{Name: nodeName}, node); err != nil {

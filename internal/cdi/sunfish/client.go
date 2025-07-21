@@ -10,6 +10,7 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/IBM/composable-resource-operator/api/v1alpha1"
+	"github.com/IBM/composable-resource-operator/internal/cdi"
 )
 
 var (
@@ -126,4 +127,8 @@ func (s *SunfishClient) RemoveResource(instance *v1alpha1.ComposableResource) er
 
 func (s *SunfishClient) CheckResource(instance *v1alpha1.ComposableResource) error {
 	return nil
+}
+
+func (s *SunfishClient) GetResources() (deviceInfoList []cdi.DeviceInfo, err error) {
+	return nil, nil
 }

@@ -510,7 +510,6 @@ func (r *ComposabilityRequestReconciler) handleUpdatingState(ctx context.Context
 		composabilityRequestLog.Info("waiting for all ComposableResources to become online", "composabilityRequest", request.Name)
 		return r.requeueAfter(30*time.Second, nil)
 	}
-
 }
 
 func (r *ComposabilityRequestReconciler) handleRunningState(ctx context.Context, request *crov1alpha1.ComposabilityRequest) (ctrl.Result, error) {
