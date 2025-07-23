@@ -383,9 +383,9 @@ func (f *FTIClient) getNodeMachineID(nodeName string) (string, error) {
 		}
 
 		providerID := node.Spec.ProviderID
-		machineUUID, found := strings.CutPrefix(providerID, "fti_cdi://")
+		machineUUID, found := strings.CutPrefix(providerID, "fsas-cdi://")
 		if !found {
-			return "", fmt.Errorf("invalid format: expected 'fti_cdi://machineUUID', now is '%s'", providerID)
+			return "", fmt.Errorf("invalid format: expected 'fsas-cdi://machineUUID', now is '%s'", providerID)
 		}
 
 		return machineUUID, nil
