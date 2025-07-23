@@ -47,9 +47,7 @@ const (
 	composableResourceDeleteDeviceAnnotation = "infradds.io/delete-device"
 )
 
-var (
-	composabilityRequestLog = ctrl.Log.WithName("composability_request_controller")
-)
+var composabilityRequestLog = ctrl.Log.WithName("composability_request_controller")
 
 // ComposabilityRequestReconciler reconciles a ComposabilityRequest object
 type ComposabilityRequestReconciler struct {

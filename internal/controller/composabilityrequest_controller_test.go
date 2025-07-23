@@ -1169,7 +1169,7 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 
 				expectedUsedNodes: []string{worker0Name, worker0Name},
 			}),
-			Entry("should succeed when user changes the model             with differentnode", testcase{
+			Entry("should succeed when user changes the OtherSpec         with differentnode", testcase{
 				requestName: "test-composability-request",
 				requestSpec: func() *crov1alpha1.ComposabilityRequestSpec {
 					composabilityRequestSpec := baseComposabilityRequestUsingDifferentNode.Spec.DeepCopy()

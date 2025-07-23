@@ -376,7 +376,7 @@ func generateFMMachineData(state string) []byte {
 					Status:       0,
 					StatusDetail: "",
 					Resources: []ftifmapi.GetMachineResource{
-						ftifmapi.GetMachineResource{
+						{
 							ResourceUUID: "device00-uuid-temp-0000-other0000000",
 							ResourceName: "",
 							Type:         "memory",
@@ -384,7 +384,7 @@ func generateFMMachineData(state string) []byte {
 							OptionStatus: "0",
 							SerialNum:    "",
 						},
-						ftifmapi.GetMachineResource{
+						{
 							ResourceUUID: "GPU-device00-uuid-temp-0000-other0000000",
 							ResourceName: "",
 							Type:         "gpu",
@@ -1051,9 +1051,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 		})
 
 		Describe("When the ComposableResource is in Attaching state", func() {
-			var (
-				patches *gomonkey.Patches
-			)
+			var patches *gomonkey.Patches
 
 			type testcase struct {
 				tenant_uuid  string
@@ -2914,7 +2912,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 										Name: "device-0",
 										Basic: &resourcev1alpha3.BasicDevice{
 											Attributes: map[resourcev1alpha3.QualifiedName]resourcev1alpha3.DeviceAttribute{
-												"uuid": resourcev1alpha3.DeviceAttribute{
+												"uuid": {
 													StringValue: ptr.To("GPU-device00-uuid-temp-0000-000000000000"),
 												},
 											},
@@ -3665,9 +3663,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 		})
 
 		Describe("When the ComposableResource is in Detaching state", func() {
-			var (
-				patches *gomonkey.Patches
-			)
+			var patches *gomonkey.Patches
 
 			type testcase struct {
 				tenant_uuid  string
@@ -5127,9 +5123,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 		})
 
 		Describe("When the ComposableResource is in Attaching state", func() {
-			var (
-				patches *gomonkey.Patches
-			)
+			var patches *gomonkey.Patches
 
 			type testcase struct {
 				tenant_uuid  string
@@ -7362,9 +7356,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 		})
 
 		Describe("When the ComposableResource is in Detaching state", func() {
-			var (
-				patches *gomonkey.Patches
-			)
+			var patches *gomonkey.Patches
 
 			type testcase struct {
 				tenant_uuid  string
@@ -8318,9 +8310,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 	})
 
 	Describe("When user provides wrong env variables", func() {
-		var (
-			patches *gomonkey.Patches
-		)
+		var patches *gomonkey.Patches
 
 		type testcase struct {
 			cdiProviderType    string

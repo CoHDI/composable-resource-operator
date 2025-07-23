@@ -15,9 +15,7 @@ import (
 	"github.com/IBM/composable-resource-operator/internal/utils"
 )
 
-var (
-	upstreamSyncerLog = ctrl.Log.WithName("upstream_syncer_controller")
-)
+var upstreamSyncerLog = ctrl.Log.WithName("upstream_syncer_controller")
 
 type UpstreamSyncerReconciler struct {
 	client.Client

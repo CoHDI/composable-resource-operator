@@ -44,9 +44,7 @@ type ComposableResourceReconciler struct {
 	RestConfig *rest.Config
 }
 
-var (
-	composableResourceLog = ctrl.Log.WithName("composable_resource_controller")
-)
+var composableResourceLog = ctrl.Log.WithName("composable_resource_controller")
 
 // +kubebuilder:rbac:groups=cro.hpsys.ibm.ie.com,resources=composableresources,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=cro.hpsys.ibm.ie.com,resources=composableresources/status,verbs=get;update;patch
@@ -291,7 +289,7 @@ func (r *ComposableResourceReconciler) handleDetachingState(ctx context.Context,
 
 		if err := adapter.CDIProvider.RemoveResource(resource); err != nil {
 			if errors.Is(err, cdi.ErrWaitingDeviceDetaching) {
-				//It takes time to remove a device, so wait to requeue.
+				// It takes time to remove a device, so wait to requeue.
 				composableResourceLog.Info("the device is being removed, please wait", "ComposableResource", resource.Name)
 				return r.requeueAfter(30*time.Second, nil)
 			}

@@ -13,9 +13,7 @@ import (
 	"github.com/IBM/composable-resource-operator/internal/cdi"
 )
 
-var (
-	setupLog = ctrl.Log.WithName("sunfish_client")
-)
+var setupLog = ctrl.Log.WithName("sunfish_client")
 
 type ProcessorType string
 
@@ -88,7 +86,6 @@ func (s *SunfishClient) sendPatchRequest(cr CompositionRequest) (string, string,
 }
 
 func (s *SunfishClient) AddResource(instance *v1alpha1.ComposableResource) (string, string, error) {
-
 	pr := ProcessorRequest{}
 
 	switch instance.Spec.Model {
@@ -107,7 +104,6 @@ func (s *SunfishClient) AddResource(instance *v1alpha1.ComposableResource) (stri
 }
 
 func (s *SunfishClient) RemoveResource(instance *v1alpha1.ComposableResource) error {
-
 	pr := ProcessorRequest{}
 	switch instance.Spec.Model {
 	case V100, A10080G, A10040G:

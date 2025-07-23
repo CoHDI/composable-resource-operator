@@ -55,6 +55,7 @@ var (
 	worker6Name = "worker-6"
 	worker7Name = "worker-7"
 )
+
 var (
 	composableResource0Name = "gpu-00000000-temp-uuid-0000-000000000000"
 	composableResource1Name = "gpu-00000000-temp-uuid-0000-000000000001"
@@ -142,11 +143,13 @@ func callFunction(fn interface{}, args ...interface{}) error {
 	return nil
 }
 
-var ctx context.Context
-var cancel context.CancelFunc
-var testEnv *envtest.Environment
-var cfg *rest.Config
-var k8sClient *MyClient
+var (
+	ctx       context.Context
+	cancel    context.CancelFunc
+	testEnv   *envtest.Environment
+	cfg       *rest.Config
+	k8sClient *MyClient
+)
 
 func TestControllers(t *testing.T) {
 	RegisterFailHandler(Fail)

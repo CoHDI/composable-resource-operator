@@ -25,9 +25,7 @@ import (
 	ftifmapi "github.com/IBM/composable-resource-operator/internal/cdi/fti/fm/api"
 )
 
-var (
-	clientLog = ctrl.Log.WithName("fti_fm_client")
-)
+var clientLog = ctrl.Log.WithName("fti_fm_client")
 
 type FTIClient struct {
 	compositionServiceEndpoint string

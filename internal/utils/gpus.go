@@ -22,9 +22,7 @@ import (
 	crov1alpha1 "github.com/IBM/composable-resource-operator/api/v1alpha1"
 )
 
-var (
-	gpusLog = ctrl.Log.WithName("utils_gpus")
-)
+var gpusLog = ctrl.Log.WithName("utils_gpus")
 
 type AccountedAppInfo struct {
 	GPUUUID     string
@@ -177,7 +175,7 @@ func DrainGPU(ctx context.Context, client client.Client, clientset *kubernetes.C
 	}
 
 	// Check that /dev/nvidiaX is not open.
-	var checkShell = `
+	checkShell := `
         TARGET_FILE="/dev/nvidia` + targetGPUIndex + `";
         for PID_DIR in /proc/[0-9]*; do
             PID=$(basename "$PID_DIR");

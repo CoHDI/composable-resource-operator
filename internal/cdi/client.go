@@ -21,5 +21,7 @@ type CdiProvider interface {
 	GetResources() (deviceInfoList []DeviceInfo, err error)
 }
 
-var ErrWaitingDeviceAttaching = errors.New("device is attaching to the cluster")
-var ErrWaitingDeviceDetaching = errors.New("device is detaching from the cluster")
+var (
+	ErrWaitingDeviceAttaching = errors.New("device is attaching to the cluster")
+	ErrWaitingDeviceDetaching = errors.New("device is detaching from the cluster")
+)

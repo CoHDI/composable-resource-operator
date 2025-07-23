@@ -275,7 +275,6 @@ func (f *FTIClient) CheckResource(instance *v1alpha1.ComposableResource) error {
 						return fmt.Errorf("the target gpu '%s' has unknown status '%s' in CM", instance.Status.DeviceID, device.Detail.ResourceOPStatus)
 					}
 				}
-
 			}
 		}
 	}

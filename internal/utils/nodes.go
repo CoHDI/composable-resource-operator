@@ -14,9 +14,7 @@ import (
 	"github.com/IBM/composable-resource-operator/api/v1alpha1"
 )
 
-var (
-	nodesLog = ctrl.Log.WithName("utils_nodes")
-)
+var nodesLog = ctrl.Log.WithName("utils_nodes")
 
 func RestartDaemonset(ctx context.Context, client client.Client, namespace string, name string) error {
 	daemonset := &appsv1.DaemonSet{}

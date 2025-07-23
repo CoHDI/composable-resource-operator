@@ -35,6 +35,7 @@ var (
 	worker6Name = "worker-6"
 	worker7Name = "worker-7"
 )
+
 var (
 	composableResource0Name = "gpu-nvidia-a100-pcie-80gb-00000000-temp-uuid-0000-000000000000"
 	composableResource1Name = "gpu-nvidia-a100-pcie-80gb-00000000-temp-uuid-0000-000000000001"
