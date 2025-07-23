@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	metal3v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	machinev1beta1 "github.com/metal3-io/cluster-api-provider-metal3/api/v1beta1"
@@ -25,10 +26,11 @@ import (
 )
 
 var (
-	clientLog    = ctrl.Log.WithName("fti_cm_client")
-	addComplete  = "ADD_COMPLETE"
-	addFailed    = "ADD_FAILED"
-	removeFailed = "REMOVE_FAILED"
+	clientLog        = ctrl.Log.WithName("fti_cm_client")
+	addComplete      = "ADD_COMPLETE"
+	addFailed        = "ADD_FAILED"
+	removeFailed     = "REMOVE_FAILED"
+	cmRequestTimeout = 60 * time.Second
 )
 
 type FTIClient struct {
@@ -58,6 +60,12 @@ type scaleDownTarget struct {
 	SpecUUID    string   `json:"spec_uuid"`
 	DeviceCount int      `json:"device_count"`
 	Devices     []string `json:"devices"`
+}
+
+func newHttpClient(ctx context.Context, token *oauth2.Token) *http.Client {
+	client := oauth2.NewClient(ctx, oauth2.StaticTokenSource(token))
+	client.Timeout = cmRequestTimeout
+	return client
 }
 
 func NewFTIClient(ctx context.Context, client client.Client, clientSet *kubernetes.Clientset) *FTIClient {
@@ -128,7 +136,7 @@ func (f *FTIClient) AddResource(instance *v1alpha1.ComposableResource) (deviceID
 		return "", "", err
 	}
 
-	client := oauth2.NewClient(f.ctx, oauth2.StaticTokenSource(token))
+	client := newHttpClient(f.ctx, token)
 	response, err := client.Do(req)
 	if err != nil {
 		clientLog.Error(err, "failed to send scaleup request to CM", "ComposableResource", instance.Name)
@@ -207,7 +215,7 @@ func (f *FTIClient) RemoveResource(instance *v1alpha1.ComposableResource) error 
 		return err
 	}
 
-	client := oauth2.NewClient(context.Background(), oauth2.StaticTokenSource(token))
+	client := newHttpClient(context.Background(), token)
 	response, err := client.Do(req)
 	if err != nil {
 		clientLog.Error(err, "failed to send scaledown request to CM", "ComposableResource", instance.Name)
@@ -375,7 +383,7 @@ func (f *FTIClient) getMachineInfo(machineID string) (*fticmapi.Data, error) {
 		return nil, err
 	}
 
-	client := oauth2.NewClient(f.ctx, oauth2.StaticTokenSource(token))
+	client := newHttpClient(f.ctx, token)
 	response, err := client.Do(req)
 	if err != nil {
 		return nil, err

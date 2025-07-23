@@ -17,6 +17,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
+const tokenRequestTimeout = 30 * time.Second
+
 type token struct {
 	AccessToken      string `json:"access_token"`
 	ExpiresIn        int64  `json:"expires_in"`
@@ -104,7 +106,10 @@ func (ts *CachedToken) Token() (*oauth2.Token, error) {
 		"grant_type":    {"password"},
 	}
 
-	response, err := http.PostForm("https://"+ts.endpoint+pathPrefix, data)
+	client := &http.Client{
+		Timeout: tokenRequestTimeout,
+	}
+	response, err := client.PostForm("https://"+ts.endpoint+pathPrefix, data)
 	if err != nil {
 		return nil, err
 	}
