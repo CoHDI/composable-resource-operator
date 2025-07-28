@@ -39,7 +39,8 @@ type ComposabilityRequestSpec struct {
 
 type ScalarResourceDetails struct {
 	// +kubebuilder:validation:Enum="gpu";"cxlmemory"
-	Type  string `json:"type"`
+	Type string `json:"type"`
+	// +kubebuilder:validation:MinLength=1
 	Model string `json:"model"`
 	// +kubebuilder:validation:Minimum=0
 	Size        int64 `json:"size"`

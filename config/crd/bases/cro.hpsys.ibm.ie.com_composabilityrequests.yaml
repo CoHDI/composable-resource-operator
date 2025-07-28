@@ -51,6 +51,7 @@ spec:
                   force_detach:
                     type: boolean
                   model:
+                    minLength: 1
                     type: string
                   other_spec:
                     properties:
@@ -124,6 +125,7 @@ spec:
                   force_detach:
                     type: boolean
                   model:
+                    minLength: 1
                     type: string
                   other_spec:
                     properties:
