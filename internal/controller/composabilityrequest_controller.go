@@ -43,8 +43,8 @@ import (
 
 const (
 	composabilityRequestFinalizer            = "com.ie.ibm.hpsys/finalizer"
-	composableResourceLastUsedTimeAnnotation = "infradds.io/last-used-time"
-	composableResourceDeleteDeviceAnnotation = "infradds.io/delete-device"
+	composableResourceLastUsedTimeAnnotation = "cohdi.io/last-used-time"
+	composableResourceDeleteDeviceAnnotation = "cohdi.io/delete-device"
 )
 
 var composabilityRequestLog = ctrl.Log.WithName("composability_request_controller")

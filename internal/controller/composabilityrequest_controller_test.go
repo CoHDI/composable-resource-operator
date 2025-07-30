@@ -1251,8 +1251,8 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 					resource0 := &crov1alpha1.ComposableResource{}
 					Expect(k8sClient.Get(ctx, types.NamespacedName{Name: composableResource0Name}, resource0)).NotTo(HaveOccurred())
 					resource0.SetAnnotations(map[string]string{
-						"infradds.io/delete-device":  "true",
-						"infradds.io/last-used-time": "2023-10-27T12:30:00Z",
+						"cohdi.io/delete-device":  "true",
+						"cohdi.io/last-used-time": "2023-10-27T12:30:00Z",
 					})
 					Expect(k8sClient.Update(ctx, resource0)).NotTo(HaveOccurred())
 
@@ -1267,8 +1267,8 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 					resource1 := &crov1alpha1.ComposableResource{}
 					Expect(k8sClient.Get(ctx, types.NamespacedName{Name: composableResource1Name}, resource1)).NotTo(HaveOccurred())
 					resource1.SetAnnotations(map[string]string{
-						"infradds.io/delete-device":  "true",
-						"infradds.io/last-used-time": "2023-10-27T10:30:00Z",
+						"cohdi.io/delete-device":  "true",
+						"cohdi.io/last-used-time": "2023-10-27T10:30:00Z",
 					})
 					Expect(k8sClient.Update(ctx, resource1)).NotTo(HaveOccurred())
 
@@ -1283,8 +1283,8 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 					resource2 := &crov1alpha1.ComposableResource{}
 					Expect(k8sClient.Get(ctx, types.NamespacedName{Name: composableResource2Name}, resource2)).NotTo(HaveOccurred())
 					resource2.SetAnnotations(map[string]string{
-						"infradds.io/delete-device":  "true",
-						"infradds.io/last-used-time": "error-RFC3339",
+						"cohdi.io/delete-device":  "true",
+						"cohdi.io/last-used-time": "error-RFC3339",
 					})
 					Expect(k8sClient.Update(ctx, resource2)).NotTo(HaveOccurred())
 					resource2.Status.State = "Online"
@@ -1319,8 +1319,8 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 					Expect(k8sClient.Status().Update(ctx, resource4)).NotTo(HaveOccurred())
 
 					deleteConfirmAnnoation := make(map[string]string)
-					deleteConfirmAnnoation["infradds.io/delete-device"] = "true"
-					deleteConfirmAnnoation["infradds.io/last-used-time"] = "2023-10-27T10:30:00Z"
+					deleteConfirmAnnoation["cohdi.io/delete-device"] = "true"
+					deleteConfirmAnnoation["cohdi.io/last-used-time"] = "2023-10-27T10:30:00Z"
 
 					createTempComposableResource(
 						composabilityRequestName,
