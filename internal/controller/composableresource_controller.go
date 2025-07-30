@@ -304,20 +304,6 @@ func (r *ComposableResourceReconciler) handleDetachingState(ctx context.Context,
 
 		composableResourceLog.Info("the device has been removed", "ComposableResource", resource.Name)
 
-		if deviceResourceType == "DEVICE_PLUGIN" {
-			if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-gpu-operator", "nvidia-device-plugin-daemonset"); err != nil {
-				return r.requeueOnErr(err, "failed to restart nvidia-device-plugin-daemonset", "composableResource", resource.Name)
-			}
-			if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-gpu-operator", "nvidia-dcgm"); err != nil {
-				return r.requeueOnErr(err, "failed to restart nvidia-dcgm", "composableResource", resource.Name)
-			}
-		} else {
-			// TODO: need to confirm the DRA's namespace.
-			if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-dra-driver", "nvidia-dra-driver-gpu-kubelet-plugin"); err != nil {
-				return r.requeueOnErr(err, "failed to restart nvidia-device-plugin-daemonset", "composableResource", resource.Name)
-			}
-		}
-
 		if err := utils.DeleteGPUTaintRule(ctx, r.Client, resource); err != nil {
 			return r.requeueOnErr(err, "failed to delete DeviceTaintRule", "composableResource", resource.Name)
 		}
@@ -327,6 +313,20 @@ func (r *ComposableResourceReconciler) handleDetachingState(ctx context.Context,
 		resource.Status.CDIDeviceID = ""
 		if err := r.Status().Update(ctx, resource); err != nil {
 			return r.requeueOnErr(err, "failed to update composableResource", "composableResource", resource.Name)
+		}
+	}
+
+	if deviceResourceType == "DEVICE_PLUGIN" {
+		if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-gpu-operator", "nvidia-device-plugin-daemonset"); err != nil {
+			return r.requeueOnErr(err, "failed to restart nvidia-device-plugin-daemonset", "composableResource", resource.Name)
+		}
+		if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-gpu-operator", "nvidia-dcgm"); err != nil {
+			return r.requeueOnErr(err, "failed to restart nvidia-dcgm", "composableResource", resource.Name)
+		}
+	} else {
+		// TODO: need to confirm the DRA's namespace.
+		if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-dra-driver", "nvidia-dra-driver-gpu-kubelet-plugin"); err != nil {
+			return r.requeueOnErr(err, "failed to restart nvidia-device-plugin-daemonset", "composableResource", resource.Name)
 		}
 	}
 
