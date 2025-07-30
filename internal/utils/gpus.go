@@ -73,7 +73,7 @@ func CheckNoGPULoads(ctx context.Context, client client.Client, clientset *kuber
 		return err
 	}
 
-	command := []string{"nvidia-smi", "--query-accounted-apps=gpu_uuid,process_name", "--format=csv,noheader,nounits"}
+	command := []string{"/usr/bin/nvidia-smi", "--query-accounted-apps=gpu_uuid,process_name", "--format=csv,noheader,nounits"}
 	stdout, stderr, err := execCommandInPod(
 		ctx,
 		clientset,
@@ -157,7 +157,7 @@ func DrainGPU(ctx context.Context, client client.Client, clientset *kubernetes.C
 		cmd  []string
 		desc string
 	}{
-		{[]string{"nvidia-smi", "-i", targetGPUUUID, "-pm", "0"}, "disable persistence mode"},
+		{[]string{"/usr/bin/nvidia-smi", "-i", targetGPUUUID, "-pm", "0"}, "disable persistence mode"},
 	}
 	for _, step := range disableCommand {
 		_, stdErr, execErr := execCommandInPod(
@@ -178,14 +178,14 @@ func DrainGPU(ctx context.Context, client client.Client, clientset *kubernetes.C
 	checkShell := `
         TARGET_FILE="/dev/nvidia` + targetGPUIndex + `";
         for PID_DIR in /proc/[0-9]*; do
-            PID=$(basename "$PID_DIR");
-            CMD_NAME=$(cat "$PID_DIR/comm" 2>/dev/null || echo "[unknown]")
+            PID=$(/usr/bin/basename "$PID_DIR");
+            CMD_NAME=$(/usr/bin/cat "$PID_DIR/comm" 2>/dev/null || /usr/bin/echo "[unknown]")
 
             for FD_SYMLINK in "$PID_DIR"/fd/*; do
                 if [ -L "$FD_SYMLINK" ]; then
-                    TARGET_PATH=$(readlink -f "$FD_SYMLINK" 2>/dev/null);
+                    TARGET_PATH=$(/usr/bin/readlink -f "$FD_SYMLINK" 2>/dev/null);
                     if [ "$TARGET_PATH" = "$TARGET_FILE" ]; then
-                        echo "$CMD_NAME";
+                        /usr/bin/echo "$CMD_NAME";
                         exit 0;
                     fi;
                 fi;
@@ -215,7 +215,7 @@ func DrainGPU(ctx context.Context, client client.Client, clientset *kubernetes.C
 			cmd  []string
 			desc string
 		}{
-			{[]string{"rm", "-f", "/run/nvidia/driver/dev/nvidia" + targetGPUIndex}, "remove file /run/nvidia/driver/dev/nvidiaX"},
+			{[]string{"/usr/bin/rm", "-f", "/run/nvidia/driver/dev/nvidia" + targetGPUIndex}, "remove file /run/nvidia/driver/dev/nvidiaX"},
 		}
 		for _, step := range rmInNvidia {
 			_, stderr, execErr := execCommandInPod(
@@ -241,7 +241,7 @@ func DrainGPU(ctx context.Context, client client.Client, clientset *kubernetes.C
 			cmd  []string
 			desc string
 		}{
-			{[]string{"rm", "-f", "/dev/nvidia" + targetGPUIndex}, "remove file /dev/nvidiaX"},
+			{[]string{"/usr/bin/rm", "-f", "/dev/nvidia" + targetGPUIndex}, "remove file /dev/nvidiaX"},
 		}
 		for _, step := range rmInDRA {
 			_, stderr, execErr := execCommandInPod(
@@ -264,8 +264,8 @@ func DrainGPU(ctx context.Context, client client.Client, clientset *kubernetes.C
 		cmd  []string
 		desc string
 	}{
-		{[]string{"nvidia-smi", "drain", "-p", targetGPUBusID, "-m", "1"}, "set maintenance mode"},
-		{[]string{"nvidia-smi", "drain", "-p", targetGPUBusID, "-r"}, "reset GPU"},
+		{[]string{"/usr/bin/nvidia-smi", "drain", "-p", targetGPUBusID, "-m", "1"}, "set maintenance mode"},
+		{[]string{"/usr/bin/nvidia-smi", "drain", "-p", targetGPUBusID, "-r"}, "reset GPU"},
 	}
 	for _, step := range detachCommands {
 		_, stderr, execErr := execCommandInPod(
@@ -427,7 +427,7 @@ func getGPUInfoFromNvidiaPod(ctx context.Context, client client.Client, clientse
 		return nil, err
 	}
 
-	command := []string{"nvidia-smi", "--query-gpu=" + queryArgs, "--format=csv,noheader,nounits"}
+	command := []string{"/usr/bin/nvidia-smi", "--query-gpu=" + queryArgs, "--format=csv,noheader,nounits"}
 	stdout, stderr, err := execCommandInPod(
 		ctx,
 		clientset,
