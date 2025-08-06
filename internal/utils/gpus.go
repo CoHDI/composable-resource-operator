@@ -388,12 +388,19 @@ func getNvidiaDriverDaemonsetPod(ctx context.Context, c client.Client, targetNod
 	listOpts := []client.ListOption{
 		client.InNamespace(""),
 		client.MatchingLabels{"app.kubernetes.io/component": "nvidia-driver"},
-		client.MatchingFields{"spec.nodeName": targetNodeName},
 	}
 	if err := c.List(ctx, podList, listOpts...); err != nil {
 		return nil, fmt.Errorf("failed to list pods: %w", err)
 	}
-	if len(podList.Items) == 0 {
+
+	var foundPod *corev1.Pod
+	for i := range podList.Items {
+		pod := &podList.Items[i]
+		if pod.Spec.NodeName == targetNodeName {
+			foundPod = pod
+		}
+	}
+	if foundPod == nil {
 		return nil, fmt.Errorf("no Pod with label 'app.kubernetes.io/component=nvidia-driver' found on node %s", targetNodeName)
 	}
 
