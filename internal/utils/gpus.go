@@ -73,7 +73,7 @@ func CheckNoGPULoads(ctx context.Context, client client.Client, clientset *kuber
 		return err
 	}
 
-	command := []string{"/usr/bin/nvidia-smi", "--query-accounted-apps=gpu_uuid,process_name", "--format=csv,noheader,nounits"}
+	command := []string{"/usr/bin/nvidia-smi", "--query-compute-apps=gpu_uuid,process_name", "--format=csv,noheader,nounits"}
 	stdout, stderr, err := execCommandInPod(
 		ctx,
 		clientset,
@@ -84,7 +84,7 @@ func CheckNoGPULoads(ctx context.Context, client client.Client, clientset *kuber
 		command,
 	)
 	if stderr != "" || err != nil {
-		return fmt.Errorf("run nvidia-smi to check gpu loads failed: '%v', stderr: '%s'", err, stderr)
+		return fmt.Errorf("run nvidia-smi in pod '%s' to check gpu loads failed: '%v', stderr: '%s'", pod.Name, err, stderr)
 	}
 
 	var accountedApps []AccountedAppInfo
