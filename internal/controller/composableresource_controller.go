@@ -197,7 +197,7 @@ func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context,
 		}
 	} else if deviceResourceType == "DRA" {
 		if err := utils.RunNvidiaSmi(ctx, r.Client, r.Clientset, r.RestConfig, resource.Spec.TargetNode); err != nil {
-			return r.requeueOnErr(err, "failed to run nvidia-smi in nvidia-device-plugin-daemonset pod", "composableResource", resource.Name)
+			return r.requeueOnErr(err, "failed to run nvidia-smi in nvidia-driver-daemonset pod", "composableResource", resource.Name)
 		}
 		if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-dra-driver", "nvidia-dra-driver-gpu-kubelet-plugin"); err != nil {
 			return r.requeueOnErr(err, "failed to restart nvidia-device-plugin-daemonset", "composableResource", resource.Name)
