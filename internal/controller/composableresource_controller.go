@@ -190,17 +190,17 @@ func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context,
 		}
 
 		if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-gpu-operator", "nvidia-device-plugin-daemonset"); err != nil {
-			return r.requeueOnErr(err, "failed to restart nvidia-device-plugin-daemonset", "composableResource", resource.Name)
+			composableResourceLog.Error(err, "failed to restart nvidia-device-plugin-daemonset", "composableResource", resource.Name)
 		}
 		if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-gpu-operator", "nvidia-dcgm"); err != nil {
-			return r.requeueOnErr(err, "failed to restart nvidia-dcgm", "composableResource", resource.Name)
+			composableResourceLog.Error(err, "failed to restart nvidia-dcgm", "composableResource", resource.Name)
 		}
 	} else if deviceResourceType == "DRA" {
 		if err := utils.RunNvidiaSmi(ctx, r.Client, r.Clientset, r.RestConfig, resource.Spec.TargetNode); err != nil {
-			return r.requeueOnErr(err, "failed to run nvidia-smi in nvidia-driver-daemonset pod", "composableResource", resource.Name)
+			composableResourceLog.Error(err, "failed to run nvidia-smi in nvidia-driver-daemonset pod", "composableResource", resource.Name)
 		}
 		if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-dra-driver", "nvidia-dra-driver-gpu-kubelet-plugin"); err != nil {
-			return r.requeueOnErr(err, "failed to restart nvidia-device-plugin-daemonset", "composableResource", resource.Name)
+			composableResourceLog.Error(err, "failed to restart nvidia-dra-driver-gpu-kubelet-plugin", "composableResource", resource.Name)
 		}
 	} else {
 		err := fmt.Errorf("the env variable DEVICE_RESOURCE_TYPE has an invalid value: '%s'", deviceResourceType)
