@@ -56,12 +56,10 @@ var composableResourceLog = ctrl.Log.WithName("composable_resource_controller")
 // +kubebuilder:rbac:groups="",resources=pods/exec,verbs=create
 // +kubebuilder:rbac:groups=apps,resources=daemonsets,verbs=get;list;watch;update
 // +kubebuilder:rbac:groups=apps,resources=daemonsets/status,verbs=get
-// +kububuilder:rbac:groups=machine.openshift.io,resources=machines,verbs=get;list;watch
-// +kububuilder:rbac:groups=machine.openshift.io,resources=machines/status,verbs=get
+// +kubebuilder:rbac:groups=machine.openshift.io,resources=machines,verbs=get;list;watch
+// +kubebuilder:rbac:groups=machine.openshift.io,resources=machines/status,verbs=get
 // +kubebuilder:rbac:groups=metal3.io,resources=baremetalhosts,verbs=get;list;watch
 // +kubebuilder:rbac:groups=metal3.io,resources=baremetalhosts/status,verbs=get
-// +kubebuilder:rbac:groups=resource.k8s.io,resources=devicetaintrules,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=resource.k8s.io,resources=devicetaintrules/status,verbs=get
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get,resourceNames=credentials
 // +kubebuilder:rbac:groups=resource.k8s.io,resources=resourceslices,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=resource.k8s.io,resources=resourceslices/status,verbs=get;update;patch
@@ -278,7 +276,7 @@ func (r *ComposableResourceReconciler) handleDetachingState(ctx context.Context,
 		}
 
 		// Create a DeviceTaintRule to block the GPU from being re-scheduled.
-		if err := utils.CreateGPUTaintRule(ctx, r.Client, resource); err != nil {
+		if err := utils.CreateDeviceTaint(ctx, r.Client, resource); err != nil {
 			return r.requeueOnErr(err, "failed to create DeviceTaintRule", "composableResource", resource.Name)
 		}
 
@@ -303,10 +301,6 @@ func (r *ComposableResourceReconciler) handleDetachingState(ctx context.Context,
 		}
 
 		composableResourceLog.Info("the device has been removed", "ComposableResource", resource.Name)
-
-		if err := utils.DeleteGPUTaintRule(ctx, r.Client, resource); err != nil {
-			return r.requeueOnErr(err, "failed to delete DeviceTaintRule", "composableResource", resource.Name)
-		}
 
 		resource.Status.Error = ""
 		resource.Status.DeviceID = ""

@@ -16,7 +16,7 @@ import (
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	resourcev1alpha3 "k8s.io/api/resource/v1alpha3"
+	resourcev1 "k8s.io/api/resource/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -208,7 +208,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 
 				Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("nvidia-dra-driver"))).NotTo(HaveOccurred())
 
-				Expect(k8sClient.DeleteAllOf(ctx, &resourcev1alpha3.ResourceSlice{})).NotTo(HaveOccurred())
+				Expect(k8sClient.DeleteAllOf(ctx, &resourcev1.ResourceSlice{})).NotTo(HaveOccurred())
 
 				cleanAllComposableResources()
 

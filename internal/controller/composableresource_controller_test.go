@@ -37,7 +37,7 @@ import (
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	resourcev1alpha3 "k8s.io/api/resource/v1alpha3"
+	resourcev1 "k8s.io/api/resource/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -1124,7 +1124,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 					Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("nvidia-dra-driver"))).NotTo(HaveOccurred())
 
-					Expect(k8sClient.DeleteAllOf(ctx, &resourcev1alpha3.ResourceSlice{})).NotTo(HaveOccurred())
+					Expect(k8sClient.DeleteAllOf(ctx, &resourcev1.ResourceSlice{})).NotTo(HaveOccurred())
 
 					cleanAllComposableResources()
 
@@ -2896,25 +2896,23 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, draDaemonset)).NotTo(HaveOccurred())
 
-						resourceSlice := &resourcev1alpha3.ResourceSlice{
+						resourceSlice := &resourcev1.ResourceSlice{
 							ObjectMeta: metav1.ObjectMeta{
 								Name: "resourceslice-test",
 							},
-							Spec: resourcev1alpha3.ResourceSliceSpec{
+							Spec: resourcev1.ResourceSliceSpec{
 								Driver: "nvidia",
-								Pool: resourcev1alpha3.ResourcePool{
+								Pool: resourcev1.ResourcePool{
 									Name:               "test-pool",
 									ResourceSliceCount: 1,
 								},
-								NodeName: worker0Name,
-								Devices: []resourcev1alpha3.Device{
+								NodeName: &worker0Name,
+								Devices: []resourcev1.Device{
 									{
 										Name: "device-0",
-										Basic: &resourcev1alpha3.BasicDevice{
-											Attributes: map[resourcev1alpha3.QualifiedName]resourcev1alpha3.DeviceAttribute{
-												"uuid": {
-													StringValue: ptr.To("GPU-device00-uuid-temp-0000-000000000000"),
-												},
+										Attributes: map[resourcev1.QualifiedName]resourcev1.DeviceAttribute{
+											"uuid": {
+												StringValue: ptr.To("GPU-device00-uuid-temp-0000-000000000000"),
 											},
 										},
 									},
@@ -5197,7 +5195,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("nvidia-dra-driver"))).NotTo(HaveOccurred())
 					Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("nvidia-gpu-operator"))).NotTo(HaveOccurred())
 
-					Expect(k8sClient.DeleteAllOf(ctx, &resourcev1alpha3.ResourceSlice{})).NotTo(HaveOccurred())
+					Expect(k8sClient.DeleteAllOf(ctx, &resourcev1.ResourceSlice{})).NotTo(HaveOccurred())
 
 					cleanAllComposableResources()
 
@@ -8405,7 +8403,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 				Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("nvidia-dra-driver"))).NotTo(HaveOccurred())
 
-				Expect(k8sClient.DeleteAllOf(ctx, &resourcev1alpha3.ResourceSlice{})).NotTo(HaveOccurred())
+				Expect(k8sClient.DeleteAllOf(ctx, &resourcev1.ResourceSlice{})).NotTo(HaveOccurred())
 
 				cleanAllComposableResources()
 			})

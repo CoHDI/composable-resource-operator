@@ -7,15 +7,12 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
-	resourcev1alpha3 "k8s.io/api/resource/v1alpha3"
-	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	resourcev1 "k8s.io/api/resource/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
-	"k8s.io/utils/ptr"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -35,14 +32,14 @@ func (a AccountedAppInfo) String() string {
 
 func CheckGPUVisible(ctx context.Context, client client.Client, clientset *kubernetes.Clientset, restConfig *rest.Config, deviceResourceType string, resource *crov1alpha1.ComposableResource) (bool, error) {
 	if deviceResourceType == "DRA" {
-		resourceSliceList := &resourcev1alpha3.ResourceSliceList{}
+		resourceSliceList := &resourcev1.ResourceSliceList{}
 		if err := client.List(ctx, resourceSliceList); err != nil {
 			return false, err
 		}
 
 		for _, rs := range resourceSliceList.Items {
 			for _, device := range rs.Spec.Devices {
-				for attrName, attrValue := range device.Basic.Attributes {
+				for attrName, attrValue := range device.Attributes {
 					if attrName == "uuid" && *attrValue.StringValue == resource.Status.DeviceID {
 						return true, nil
 					}
@@ -297,61 +294,36 @@ func RunNvidiaSmi(ctx context.Context, client client.Client, clientset *kubernet
 	return nil
 }
 
-func CreateGPUTaintRule(ctx context.Context, client client.Client, resource *crov1alpha1.ComposableResource) error {
-	gpuTaintRuleName := fmt.Sprintf("taint-rule-%s", resource.Status.DeviceID)
-	gpuTaintRuleName = strings.ToLower(gpuTaintRuleName)
-	gpuTaintRule := &resourcev1alpha3.DeviceTaintRule{}
-
-	if err := client.Get(ctx, types.NamespacedName{Name: gpuTaintRuleName}, gpuTaintRule); err == nil {
-		// This means that the DeviceTaintRule already exists and does not need to be created again.
-		return nil
-	}
-
-	celExpression := fmt.Sprintf(`device.attributes["gpu.nvidia.com"].Uuid == '%s'`, resource.Status.DeviceID)
-	gpuTaintRule = &resourcev1alpha3.DeviceTaintRule{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: gpuTaintRuleName,
-		},
-		Spec: resourcev1alpha3.DeviceTaintRuleSpec{
-			Taint: resourcev1alpha3.DeviceTaint{
-				Key:    "nvidia/gpu-model",
-				Effect: "NoSchedule",
-				Value:  resource.Spec.Model,
-			},
-			DeviceSelector: &resourcev1alpha3.DeviceTaintSelector{
-				Driver: ptr.To("gpu.nvidia.com"),
-				Selectors: []resourcev1alpha3.DeviceSelector{
-					{
-						CEL: &resourcev1alpha3.CELDeviceSelector{
-							Expression: celExpression,
-						},
-					},
-				},
-			},
-		},
-	}
-
-	if err := client.Create(ctx, gpuTaintRule); err != nil {
+func CreateDeviceTaint(ctx context.Context, client client.Client, resource *crov1alpha1.ComposableResource) error {
+	resourceSliceList := &resourcev1.ResourceSliceList{}
+	if err := client.List(ctx, resourceSliceList); err != nil {
 		return err
 	}
 
-	return nil
-}
+	for i := range resourceSliceList.Items {
+		rs := &resourceSliceList.Items[i]
+		for j := range rs.Spec.Devices {
+			device := &rs.Spec.Devices[j]
+			for attrName, attrValue := range device.Attributes {
+				if attrName != "uuid" || *attrValue.StringValue != resource.Status.DeviceID {
+					continue
+				}
 
-func DeleteGPUTaintRule(ctx context.Context, client client.Client, resource *crov1alpha1.ComposableResource) error {
-	gpuTaintRuleName := fmt.Sprintf("gpu-taint-rule-%s", resource.Status.DeviceID)
-	gpuTaintRule := &resourcev1alpha3.DeviceTaintRule{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: gpuTaintRuleName,
-		},
+				device.Taints = append(device.Taints, resourcev1.DeviceTaint{
+					Key:    "k8s.io/device-uuid",
+					Value:  resource.Status.DeviceID,
+					Effect: resourcev1.DeviceTaintEffectNoSchedule,
+				})
+
+				if err := client.Update(ctx, rs); err != nil {
+					return err
+				}
+				return nil
+			}
+		}
 	}
 
-	err := client.Delete(ctx, gpuTaintRule)
-	if k8serrors.IsNotFound(err) {
-		return nil
-	}
-
-	return err
+	return fmt.Errorf("failed to create device taint for resource %s: can not found device '%s' in ResourceSlices", resource.Name, resource.Status.DeviceID)
 }
 
 func execCommandInPod(ctx context.Context, clientset *kubernetes.Clientset, restConfig *rest.Config, namespace string, podName string, containerName string, command []string) (string, string, error) {
