@@ -198,7 +198,7 @@ func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context,
 		if err := utils.RunNvidiaSmi(ctx, r.Client, r.Clientset, r.RestConfig, resource.Spec.TargetNode); err != nil {
 			composableResourceLog.Error(err, "failed to run nvidia-smi in nvidia-driver-daemonset pod", "composableResource", resource.Name)
 		}
-		if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-dra-driver", "nvidia-dra-driver-gpu-kubelet-plugin"); err != nil {
+		if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-dra-driver-gpu", "nvidia-dra-driver-gpu-kubelet-plugin"); err != nil {
 			composableResourceLog.Error(err, "failed to restart nvidia-dra-driver-gpu-kubelet-plugin", "composableResource", resource.Name)
 		}
 	} else {
@@ -333,7 +333,7 @@ func (r *ComposableResourceReconciler) handleDetachingState(ctx context.Context,
 			}
 		} else {
 			// TODO: need to confirm the DRA's namespace.
-			if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-dra-driver", "nvidia-dra-driver-gpu-kubelet-plugin"); err != nil {
+			if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-dra-driver-gpu", "nvidia-dra-driver-gpu-kubelet-plugin"); err != nil {
 				return r.requeueOnErr(err, "failed to restart nvidia-device-plugin-daemonset", "composableResource", resource.Name)
 			}
 		}
