@@ -31,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
+	"github.com/IBM/composable-resource-operator/api/v1alpha1"
 	crov1alpha1 "github.com/IBM/composable-resource-operator/api/v1alpha1"
 	"github.com/IBM/composable-resource-operator/internal/cdi"
 	"github.com/IBM/composable-resource-operator/internal/utils"
@@ -310,17 +311,31 @@ func (r *ComposableResourceReconciler) handleDetachingState(ctx context.Context,
 		}
 	}
 
-	if deviceResourceType == "DEVICE_PLUGIN" {
-		if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-gpu-operator", "nvidia-device-plugin-daemonset"); err != nil {
-			return r.requeueOnErr(err, "failed to restart nvidia-device-plugin-daemonset", "composableResource", resource.Name)
+	composableResourceList := &v1alpha1.ComposableResourceList{}
+	if err := r.List(ctx, composableResourceList); err != nil {
+		return r.requeueOnErr(err, "failed to list ComposableResource", "ComposableResource", resource.Name)
+	}
+
+	gpuCount := 0
+	for _, composableResource := range composableResourceList.Items {
+		if composableResource.Status.DeviceID != "" {
+			gpuCount++
 		}
-		if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-gpu-operator", "nvidia-dcgm"); err != nil {
-			return r.requeueOnErr(err, "failed to restart nvidia-dcgm", "composableResource", resource.Name)
-		}
-	} else {
-		// TODO: need to confirm the DRA's namespace.
-		if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-dra-driver", "nvidia-dra-driver-gpu-kubelet-plugin"); err != nil {
-			return r.requeueOnErr(err, "failed to restart nvidia-device-plugin-daemonset", "composableResource", resource.Name)
+	}
+
+	if gpuCount > 0 {
+		if deviceResourceType == "DEVICE_PLUGIN" {
+			if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-gpu-operator", "nvidia-device-plugin-daemonset"); err != nil {
+				return r.requeueOnErr(err, "failed to restart nvidia-device-plugin-daemonset", "composableResource", resource.Name)
+			}
+			if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-gpu-operator", "nvidia-dcgm"); err != nil {
+				return r.requeueOnErr(err, "failed to restart nvidia-dcgm", "composableResource", resource.Name)
+			}
+		} else {
+			// TODO: need to confirm the DRA's namespace.
+			if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-dra-driver", "nvidia-dra-driver-gpu-kubelet-plugin"); err != nil {
+				return r.requeueOnErr(err, "failed to restart nvidia-device-plugin-daemonset", "composableResource", resource.Name)
+			}
 		}
 	}
 
