@@ -300,6 +300,12 @@ func CreateDeviceTaint(ctx context.Context, client client.Client, resource *crov
 		return err
 	}
 
+	desiredTaint := resourcev1.DeviceTaint{
+		Key:    "k8s.io/device-uuid",
+		Value:  resource.Status.DeviceID,
+		Effect: resourcev1.DeviceTaintEffectNoSchedule,
+	}
+
 	for i := range resourceSliceList.Items {
 		rs := &resourceSliceList.Items[i]
 		for j := range rs.Spec.Devices {
@@ -309,12 +315,13 @@ func CreateDeviceTaint(ctx context.Context, client client.Client, resource *crov
 					continue
 				}
 
-				device.Taints = append(device.Taints, resourcev1.DeviceTaint{
-					Key:    "k8s.io/device-uuid",
-					Value:  resource.Status.DeviceID,
-					Effect: resourcev1.DeviceTaintEffectNoSchedule,
-				})
+				for _, existingTaint := range device.Taints {
+					if existingTaint == desiredTaint {
+						return nil
+					}
+				}
 
+				device.Taints = append(device.Taints, desiredTaint)
 				if err := client.Update(ctx, rs); err != nil {
 					return err
 				}
