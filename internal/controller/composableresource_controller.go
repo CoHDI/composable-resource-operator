@@ -104,11 +104,6 @@ func (r *ComposableResourceReconciler) Reconcile(ctx context.Context, req ctrl.R
 		if err != nil {
 			return r.requeueOnErr(err, "failed to handle Online state", "composableResource", composableResource.Name)
 		}
-	case "Cleaning":
-		result, err = r.handleCleaningState(ctx, composableResource)
-		if err != nil {
-			return r.requeueOnErr(err, "failed to handle Cleaning state", "composableResource", composableResource.Name)
-		}
 	case "Detaching":
 		result, err = r.handleDetachingState(ctx, composableResource, adapter)
 		if err != nil {
@@ -150,8 +145,15 @@ func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context,
 	composableResourceLog.Info("start handling Attaching state", "ComposableResource", resource.Name)
 
 	if resource.DeletionTimestamp != nil {
-		resource.Status.State = "Cleaning"
-		return ctrl.Result{}, r.Status().Update(ctx, resource)
+		if resource.Status.DeviceID == "" {
+			resource.Status.State = "Deleting"
+			return ctrl.Result{}, r.Status().Update(ctx, resource)
+		} else {
+			if resource.Status.Error != "" {
+				resource.Status.State = "Detaching"
+				return ctrl.Result{}, r.Status().Update(ctx, resource)
+			}
+		}
 	}
 
 	deviceResourceType := os.Getenv("DEVICE_RESOURCE_TYPE")
@@ -203,11 +205,19 @@ func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context,
 		}
 	} else {
 		err := fmt.Errorf("the env variable DEVICE_RESOURCE_TYPE has an invalid value: '%s'", deviceResourceType)
+		resource.Status.Error = err.Error()
+		if err := r.Status().Update(ctx, resource); err != nil {
+			return r.requeueOnErr(err, "failed to update composableResource", "composableResource", resource.Name)
+		}
 		return r.requeueOnErr(err, "failed to check the env variable DEVICE_RESOURCE_TYPE value", "composableResource", resource.Name)
 	}
 
 	visible, err := utils.CheckGPUVisible(ctx, r.Client, r.Clientset, r.RestConfig, deviceResourceType, resource)
 	if err != nil {
+		resource.Status.Error = err.Error()
+		if err := r.Status().Update(ctx, resource); err != nil {
+			return r.requeueOnErr(err, "failed to update composableResource", "composableResource", resource.Name)
+		}
 		return r.requeueOnErr(err, "failed to check if the gpu has been recognized by cluster", "ComposableResource", resource.Name)
 	}
 	if visible {
@@ -223,7 +233,7 @@ func (r *ComposableResourceReconciler) handleOnlineState(ctx context.Context, re
 	composableResourceLog.Info("start handling Online state", "ComposableResource", resource.Name)
 
 	if resource.DeletionTimestamp != nil {
-		resource.Status.State = "Cleaning"
+		resource.Status.State = "Detaching"
 		return ctrl.Result{}, r.Status().Update(ctx, resource)
 	}
 
@@ -236,18 +246,6 @@ func (r *ComposableResourceReconciler) handleOnlineState(ctx context.Context, re
 	}
 
 	return r.requeueAfter(30*time.Second, nil)
-}
-
-func (r *ComposableResourceReconciler) handleCleaningState(ctx context.Context, resource *crov1alpha1.ComposableResource) (ctrl.Result, error) {
-	composableResourceLog.Info("start handling Cleaning state", "ComposableResource", resource.Name)
-
-	if resource.Status.DeviceID != "" {
-		resource.Status.State = "Detaching"
-		return ctrl.Result{}, r.Status().Update(ctx, resource)
-	}
-
-	resource.Status.State = "Deleting"
-	return ctrl.Result{}, r.Status().Update(ctx, resource)
 }
 
 func (r *ComposableResourceReconciler) handleDetachingState(ctx context.Context, resource *crov1alpha1.ComposableResource, adapter *ComposableResourceAdapter) (ctrl.Result, error) {
