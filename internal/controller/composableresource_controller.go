@@ -275,8 +275,10 @@ func (r *ComposableResourceReconciler) handleDetachingState(ctx context.Context,
 		}
 
 		// Create a DeviceTaintRule to block the GPU from being re-scheduled.
-		if err := utils.CreateDeviceTaint(ctx, r.Client, resource); err != nil {
-			return r.requeueOnErr(err, "failed to create DeviceTaintRule", "composableResource", resource.Name)
+		if deviceResourceType == "DRA" {
+			if err := utils.CreateDeviceTaint(ctx, r.Client, resource); err != nil {
+				return r.requeueOnErr(err, "failed to add DeviceTaint", "composableResource", resource.Name)
+			}
 		}
 
 		// Use nvidia-smi to remove gpu from the target node.

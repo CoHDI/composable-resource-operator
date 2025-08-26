@@ -81,7 +81,7 @@ func (t *CachedToken) GetToken() (*oauth2.Token, error) {
 
 func (ts *CachedToken) Token() (*oauth2.Token, error) {
 	// TODO: Need to confirm credential's name and namespace.
-	namespace := "credentials-namespace"
+	namespace := "composable-resource-operator-system"
 	secretName := "credentials"
 
 	secret, err := ts.clientSet.CoreV1().Secrets(namespace).Get(context.TODO(), secretName, metav1.GetOptions{})
