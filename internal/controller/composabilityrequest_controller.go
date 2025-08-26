@@ -75,7 +75,7 @@ func (r *ComposabilityRequestReconciler) Reconcile(ctx context.Context, req ctrl
 	composabilityRequest := &crov1alpha1.ComposabilityRequest{}
 	foundComposabilityRequest, err := r.tryGet(ctx, req.NamespacedName, composabilityRequest)
 	if err != nil {
-		return r.requeueOnErr(err, "failed to get composabilityRequest", "request", req.NamespacedName)
+		return r.requeueOnErr(composabilityRequest, err, "failed to get composabilityRequest", "request", req.NamespacedName)
 	}
 	if foundComposabilityRequest {
 		return r.handleComposabilityRequestChange(ctx, composabilityRequest)
@@ -84,7 +84,7 @@ func (r *ComposabilityRequestReconciler) Reconcile(ctx context.Context, req ctrl
 	composableResource := &crov1alpha1.ComposableResource{}
 	foundComposableResource, err := r.tryGet(ctx, req.NamespacedName, composableResource)
 	if err != nil {
-		return r.requeueOnErr(err, "failed to get composableResource", "request", req.NamespacedName)
+		return r.requeueOnErr(composabilityRequest, err, "failed to get composableResource", "request", req.NamespacedName)
 	}
 	if foundComposableResource {
 		return r.handleComposableResourceChange(ctx, composableResource)
@@ -103,36 +103,36 @@ func (r *ComposabilityRequestReconciler) handleComposabilityRequestChange(ctx co
 	case "":
 		result, err = r.handleNoneState(ctx, composabilityRequest)
 		if err != nil {
-			return r.requeueOnErr(err, "failed to handle None state", "composabilityRequest", composabilityRequest.Name)
+			return r.requeueOnErr(composabilityRequest, err, "failed to handle None state", "composabilityRequest", composabilityRequest.Name)
 		}
 	case "NodeAllocating":
 		result, err = r.handleNodeAllocatingState(ctx, composabilityRequest)
 		if err != nil {
-			return r.requeueOnErr(err, "failed to handle NodeAllocating state", "composabilityRequest", composabilityRequest.Name)
+			return r.requeueOnErr(composabilityRequest, err, "failed to handle NodeAllocating state", "composabilityRequest", composabilityRequest.Name)
 		}
 	case "Updating":
 		result, err = r.handleUpdatingState(ctx, composabilityRequest)
 		if err != nil {
-			return r.requeueOnErr(err, "failed to handle Updating state", "composabilityRequest", composabilityRequest.Name)
+			return r.requeueOnErr(composabilityRequest, err, "failed to handle Updating state", "composabilityRequest", composabilityRequest.Name)
 		}
 	case "Running":
 		result, err = r.handleRunningState(ctx, composabilityRequest)
 		if err != nil {
-			return r.requeueOnErr(err, "failed to handle Running state", "composabilityRequest", composabilityRequest.Name)
+			return r.requeueOnErr(composabilityRequest, err, "failed to handle Running state", "composabilityRequest", composabilityRequest.Name)
 		}
 	case "Cleaning":
 		result, err = r.handleCleaningState(ctx, composabilityRequest)
 		if err != nil {
-			return r.requeueOnErr(err, "failed to handle Cleaning state", "composabilityRequest", composabilityRequest.Name)
+			return r.requeueOnErr(composabilityRequest, err, "failed to handle Cleaning state", "composabilityRequest", composabilityRequest.Name)
 		}
 	case "Deleting":
 		result, err = r.handleDeletingState(ctx, composabilityRequest)
 		if err != nil {
-			return r.requeueOnErr(err, "failed to handle Deleting state", "composabilityRequest", composabilityRequest.Name)
+			return r.requeueOnErr(composabilityRequest, err, "failed to handle Deleting state", "composabilityRequest", composabilityRequest.Name)
 		}
 	default:
 		err = fmt.Errorf("the composabilityRequest state '%s' is invalid", composabilityRequest.Status.State)
-		return r.requeueOnErr(err, "failed to handle composabilityRequest state", "composabilityRequest", composabilityRequest.Name)
+		return r.requeueOnErr(composabilityRequest, err, "failed to handle composabilityRequest state", "composabilityRequest", composabilityRequest.Name)
 	}
 
 	return result, nil
@@ -142,7 +142,7 @@ func (r *ComposabilityRequestReconciler) handleComposableResourceChange(ctx cont
 	composabilityRequestName := composableResource.ObjectMeta.GetLabels()["app.kubernetes.io/managed-by"]
 	composabilityRequest := &crov1alpha1.ComposabilityRequest{}
 	if err := r.Get(ctx, types.NamespacedName{Name: composabilityRequestName}, composabilityRequest); err != nil {
-		return r.requeueOnErr(err, "failed to get composabilityRequest", "composabilityRequest", composabilityRequestName)
+		return r.requeueOnErr(composabilityRequest, err, "failed to get composabilityRequest", "composabilityRequest", composabilityRequestName)
 	}
 
 	// Synchronize changes in ComposableResource to ComposabilityRequest.Status.Resources.
@@ -166,12 +166,13 @@ func (r *ComposabilityRequestReconciler) handleNoneState(ctx context.Context, re
 	if !controllerutil.ContainsFinalizer(request, composabilityRequestFinalizer) {
 		controllerutil.AddFinalizer(request, composabilityRequestFinalizer)
 		if err := r.Update(ctx, request); err != nil {
-			return r.requeueOnErr(err, "failed to add finalizer", "composabilityRequest", request.Name)
+			return r.requeueOnErr(request, err, "failed to add finalizer", "composabilityRequest", request.Name)
 		}
 	}
 
 	request.Status.State = "NodeAllocating"
 	request.Status.ScalarResource = request.Spec.Resource
+	request.Status.Error = ""
 	return ctrl.Result{}, r.Status().Update(ctx, request)
 }
 
@@ -186,19 +187,19 @@ func (r *ComposabilityRequestReconciler) handleNodeAllocatingState(ctx context.C
 	// List ComposableResources managed by this ComposabilityRequest.
 	composableResourceList := &crov1alpha1.ComposableResourceList{}
 	if err := r.List(ctx, composableResourceList, client.MatchingLabels{"app.kubernetes.io/managed-by": request.Name}); err != nil {
-		return r.requeueOnErr(err, "failed to list ComposableResources managed by this composabilityRequest", "composabilityRequest", request.Name)
+		return r.requeueOnErr(request, err, "failed to list ComposableResources managed by this composabilityRequest", "composabilityRequest", request.Name)
 	}
 
 	// List ComposabilityRequests.
 	composabilityRequestList := &crov1alpha1.ComposabilityRequestList{}
 	if err := r.List(ctx, composabilityRequestList); err != nil {
-		return r.requeueOnErr(err, "failed to list ComposabilityRequests", "composabilityRequest", request.Name)
+		return r.requeueOnErr(request, err, "failed to list ComposabilityRequests", "composabilityRequest", request.Name)
 	}
 
 	// Get all nodes.
 	nodes, err := utils.GetAllNodes(ctx, r.Client)
 	if err != nil {
-		return r.requeueOnErr(err, "failed to get all nodes", "composabilityRequest", request.Name)
+		return r.requeueOnErr(request, err, "failed to get all nodes", "composabilityRequest", request.Name)
 	}
 
 	resourcesToAllocate := request.Spec.Resource.Size
@@ -222,7 +223,7 @@ func (r *ComposabilityRequestReconciler) handleNodeAllocatingState(ctx context.C
 			if request.Spec.Resource.OtherSpec != nil {
 				isSufficient, err := utils.CheckNodeCapacitySufficient(ctx, r.Client, resource.Spec.TargetNode, request.Spec.Resource.OtherSpec)
 				if err != nil {
-					return r.requeueOnErr(err, "failed to check TargetNode capacity", "TargetNode", resource.Spec.TargetNode, "composabilityRequest", request.Name)
+					return r.requeueOnErr(request, err, "failed to check TargetNode capacity", "TargetNode", resource.Spec.TargetNode, "composabilityRequest", request.Name)
 				}
 				if !isSufficient {
 					delete(request.Status.Resources, resource.Name)
@@ -320,17 +321,17 @@ func (r *ComposabilityRequestReconciler) handleNodeAllocatingState(ctx context.C
 	if request.Spec.Resource.AllocationPolicy == "samenode" && request.Spec.Resource.TargetNode != "" {
 		if err = utils.CheckNodeExisted(ctx, r.Client, request.Spec.Resource.TargetNode); err != nil {
 			err := fmt.Errorf("the target node does not existed")
-			return r.requeueOnErr(err, "failed to find the TargetNode", "TargetNode", request.Spec.Resource.TargetNode, "composabilityRequest", request.Name)
+			return r.requeueOnErr(request, err, "failed to find the TargetNode", "TargetNode", request.Spec.Resource.TargetNode, "composabilityRequest", request.Name)
 		}
 
 		if request.Spec.Resource.OtherSpec != nil {
 			result, err := utils.CheckNodeCapacitySufficient(ctx, r.Client, request.Spec.Resource.TargetNode, request.Spec.Resource.OtherSpec)
 			if err != nil {
-				return r.requeueOnErr(err, "failed to check TargetNode capacity", "TargetNode", request.Spec.Resource.TargetNode, "composabilityRequest", request.Name)
+				return r.requeueOnErr(request, err, "failed to check TargetNode capacity", "TargetNode", request.Spec.Resource.TargetNode, "composabilityRequest", request.Name)
 			}
 			if !result {
 				err = fmt.Errorf("TargetNode does not meet spec's requirements")
-				return r.requeueOnErr(err, "failed to check TargetNode capacity", "TargetNode", request.Spec.Resource.TargetNode, "composabilityRequest", request.Name)
+				return r.requeueOnErr(request, err, "failed to check TargetNode capacity", "TargetNode", request.Spec.Resource.TargetNode, "composabilityRequest", request.Name)
 			}
 		}
 
@@ -351,7 +352,7 @@ func (r *ComposabilityRequestReconciler) handleNodeAllocatingState(ctx context.C
 				if request.Spec.Resource.OtherSpec != nil {
 					result, err := utils.CheckNodeCapacitySufficient(ctx, r.Client, node.Name, request.Spec.Resource.OtherSpec)
 					if err != nil {
-						return r.requeueOnErr(err, "failed to check node capacity", "node", node.Name, "composabilityRequest", request.Name)
+						return r.requeueOnErr(request, err, "failed to check node capacity", "node", node.Name, "composabilityRequest", request.Name)
 					}
 					if !result {
 						continue
@@ -392,7 +393,7 @@ func (r *ComposabilityRequestReconciler) handleNodeAllocatingState(ctx context.C
 
 			if len(allocatingNodes) != int(resourcesToAllocate) {
 				err := fmt.Errorf("insufficient number of available nodes")
-				return r.requeueOnErr(err, "failed to get available nodes", "composabilityRequest", request.Name)
+				return r.requeueOnErr(request, err, "failed to get available nodes", "composabilityRequest", request.Name)
 			}
 		}
 	}
@@ -401,7 +402,7 @@ func (r *ComposabilityRequestReconciler) handleNodeAllocatingState(ctx context.C
 			if request.Spec.Resource.OtherSpec != nil {
 				result, err := utils.CheckNodeCapacitySufficient(ctx, r.Client, node.Name, request.Spec.Resource.OtherSpec)
 				if err != nil {
-					return r.requeueOnErr(err, "failed to check TargetNode capacity", "TargetNode", request.Spec.Resource.TargetNode, "composabilityRequest", request.Name)
+					return r.requeueOnErr(request, err, "failed to check TargetNode capacity", "TargetNode", request.Spec.Resource.TargetNode, "composabilityRequest", request.Name)
 				}
 				if !result {
 					continue
@@ -417,7 +418,7 @@ func (r *ComposabilityRequestReconciler) handleNodeAllocatingState(ctx context.C
 
 		if len(allocatingNodes) != int(resourcesToAllocate) {
 			err := fmt.Errorf("insufficient number of available nodes")
-			return r.requeueOnErr(err, "failed to get available nodes", "composabilityRequest", request.Name)
+			return r.requeueOnErr(request, err, "failed to get available nodes", "composabilityRequest", request.Name)
 		}
 	}
 	// TODO: The current logic is that if the current env cannot meet the GPU requirements, it will continue to wait. It may needs to be modified.
@@ -434,6 +435,7 @@ func (r *ComposabilityRequestReconciler) handleNodeAllocatingState(ctx context.C
 	}
 
 	request.Status.State = "Updating"
+	request.Status.Error = ""
 	return ctrl.Result{}, r.Status().Update(ctx, request)
 }
 
@@ -454,7 +456,7 @@ func (r *ComposabilityRequestReconciler) handleUpdatingState(ctx context.Context
 	// List all ComposableResources managed by this ComposabilityRequest.
 	composableResourceList := &crov1alpha1.ComposableResourceList{}
 	if err := r.List(ctx, composableResourceList, client.MatchingLabels{"app.kubernetes.io/managed-by": request.Name}); err != nil {
-		return r.requeueOnErr(err, "failed to list ComposableResource instances", "composabilityRequest", request.Name)
+		return r.requeueOnErr(request, err, "failed to list ComposableResource instances", "composabilityRequest", request.Name)
 	}
 
 	existedResources := map[string]bool{}
@@ -464,7 +466,7 @@ func (r *ComposabilityRequestReconciler) handleUpdatingState(ctx context.Context
 		_, existed := request.Status.Resources[resource.Name]
 		if !existed {
 			if err := r.Delete(ctx, &resource); err != nil {
-				return r.requeueOnErr(err, "failed to delete ComposableResource", "composabilityRequest", request.Name)
+				return r.requeueOnErr(request, err, "failed to delete ComposableResource", "composabilityRequest", request.Name)
 			}
 		} else {
 			existedResources[resource.Name] = true
@@ -489,7 +491,7 @@ func (r *ComposabilityRequestReconciler) handleUpdatingState(ctx context.Context
 				},
 			}
 			if err := r.Create(ctx, composableResource); err != nil {
-				return r.requeueOnErr(err, "failed to create ComposableResource", "composabilityRequest", request.Name)
+				return r.requeueOnErr(request, err, "failed to create ComposableResource", "composabilityRequest", request.Name)
 			}
 		}
 	}
@@ -503,6 +505,7 @@ func (r *ComposabilityRequestReconciler) handleUpdatingState(ctx context.Context
 
 	if canRun {
 		request.Status.State = "Running"
+		request.Status.Error = ""
 		return ctrl.Result{}, r.Status().Update(ctx, request)
 	} else {
 		composabilityRequestLog.Info("waiting for all ComposableResources to become online", "composabilityRequest", request.Name)
@@ -529,6 +532,10 @@ func (r *ComposabilityRequestReconciler) handleRunningState(ctx context.Context,
 		return ctrl.Result{}, r.Status().Update(ctx, request)
 	}
 
+	request.Status.Error = ""
+	if err := r.Status().Update(ctx, request); err != nil {
+		return r.requeueOnErr(request, err, "failed to update ComposableResource status", "composabilityRequest", request.Name)
+	}
 	return r.requeueAfter(30*time.Second, nil)
 }
 
@@ -537,7 +544,7 @@ func (r *ComposabilityRequestReconciler) handleCleaningState(ctx context.Context
 
 	composableResourceList := &crov1alpha1.ComposableResourceList{}
 	if err := r.List(ctx, composableResourceList, client.MatchingLabels{"app.kubernetes.io/managed-by": request.Name}); err != nil {
-		return r.requeueOnErr(err, "failed to list ComposableResource", "composabilityRequest", request.Name)
+		return r.requeueOnErr(request, err, "failed to list ComposableResource", "composabilityRequest", request.Name)
 	}
 
 	if len(composableResourceList.Items) == 0 {
@@ -546,11 +553,15 @@ func (r *ComposabilityRequestReconciler) handleCleaningState(ctx context.Context
 	} else {
 		for _, resource := range composableResourceList.Items {
 			if err := r.Delete(ctx, &resource); err != nil {
-				return r.requeueOnErr(err, "failed to delete ComposableResource", "composabilityRequest", request.Name)
+				return r.requeueOnErr(request, err, "failed to delete ComposableResource", "composabilityRequest", request.Name)
 			}
 		}
 	}
 
+	request.Status.Error = ""
+	if err := r.Status().Update(ctx, request); err != nil {
+		return r.requeueOnErr(request, err, "failed to update ComposableResource status", "composabilityRequest", request.Name)
+	}
 	return r.requeueAfter(30*time.Second, nil)
 }
 
@@ -561,14 +572,21 @@ func (r *ComposabilityRequestReconciler) handleDeletingState(ctx context.Context
 		controllerutil.RemoveFinalizer(request, composabilityRequestFinalizer)
 	}
 	if err := r.Update(ctx, request); err != nil {
-		return r.requeueOnErr(err, "failed to remove finalizer", "composabilityRequest", request.Name)
+		return r.requeueOnErr(request, err, "failed to remove finalizer", "composabilityRequest", request.Name)
 	}
 
 	return ctrl.Result{}, nil
 }
 
-func (r *ComposabilityRequestReconciler) requeueOnErr(err error, msg string, keysAndValues ...any) (ctrl.Result, error) {
+func (r *ComposabilityRequestReconciler) requeueOnErr(composabilityRequest *crov1alpha1.ComposabilityRequest, err error, msg string, keysAndValues ...any) (ctrl.Result, error) {
 	composabilityRequestLog.Error(err, msg, keysAndValues...)
+
+	if composabilityRequest != nil {
+		composabilityRequest.Status.Error = err.Error()
+		if err := r.Status().Update(context.Background(), composabilityRequest); err != nil {
+			composabilityRequestLog.Error(err, "failed to update ComposabilityRequest status with error message", "composabilityRequest", composabilityRequest.Name)
+		}
+	}
 	return ctrl.Result{}, err
 }
 
