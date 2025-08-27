@@ -122,19 +122,17 @@ func (r *ComposableResourceReconciler) Reconcile(ctx context.Context, req ctrl.R
 func (r *ComposableResourceReconciler) handleNoneState(ctx context.Context, resource *crov1alpha1.ComposableResource) (ctrl.Result, error) {
 	composableResourceLog.Info("start handling None state", "ComposableResource", resource.Name)
 
-	if deviceID, ok := resource.Labels["cohdi.io/ready-to-detach-device-uuid"]; ok && deviceID != "" {
-		composableResourceLog.Info("detected ready-to-detach-device-uuid label, entering Detaching state", "ComposableResource", resource.Name, "deviceID", deviceID)
-		resource.Status.DeviceID = deviceID
-		resource.Status.CDIDeviceID = deviceID
-		resource.Status.State = "Detaching"
-		return ctrl.Result{}, r.Status().Update(ctx, resource)
-	}
-
 	if !controllerutil.ContainsFinalizer(resource, composabilityRequestFinalizer) {
 		controllerutil.AddFinalizer(resource, composabilityRequestFinalizer)
 		if err := r.Update(ctx, resource); err != nil {
 			return r.requeueOnErr(err, "failed to update composableResource", "ComposableResource", resource.Name)
 		}
+	}
+
+	if deviceID, ok := resource.Labels["cohdi.io/ready-to-detach-device-uuid"]; ok && deviceID != "" {
+		composableResourceLog.Info("detected ready-to-detach-device-uuid label, add device_uuid", "ComposableResource", resource.Name, "deviceID", deviceID)
+		resource.Status.DeviceID = deviceID
+		resource.Status.CDIDeviceID = deviceID
 	}
 
 	resource.Status.State = "Attaching"
@@ -233,6 +231,11 @@ func (r *ComposableResourceReconciler) handleOnlineState(ctx context.Context, re
 	composableResourceLog.Info("start handling Online state", "ComposableResource", resource.Name)
 
 	if resource.DeletionTimestamp != nil {
+		resource.Status.State = "Detaching"
+		return ctrl.Result{}, r.Status().Update(ctx, resource)
+	}
+
+	if deviceID, ok := resource.Labels["cohdi.io/ready-to-detach-device-uuid"]; ok && deviceID != "" {
 		resource.Status.State = "Detaching"
 		return ctrl.Result{}, r.Status().Update(ctx, resource)
 	}
