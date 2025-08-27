@@ -190,6 +190,16 @@ func (r *ComposabilityRequestReconciler) handleNodeAllocatingState(ctx context.C
 		return r.requeueOnErr(request, err, "failed to list ComposableResources managed by this composabilityRequest", "composabilityRequest", request.Name)
 	}
 
+	// Filter out ComposableResources with status Detaching or Deleting
+	filteredItems := make([]crov1alpha1.ComposableResource, 0)
+	for _, cr := range composableResourceList.Items {
+		// Skip resources that are in Detaching or Deleting state
+		if cr.Status.State != "Detaching" && cr.Status.State != "Deleting" {
+			filteredItems = append(filteredItems, cr)
+		}
+	}
+	composableResourceList.Items = filteredItems
+
 	// List ComposabilityRequests.
 	composabilityRequestList := &crov1alpha1.ComposabilityRequestList{}
 	if err := r.List(ctx, composabilityRequestList); err != nil {
