@@ -190,16 +190,32 @@ func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context,
 
 		if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-gpu-operator", "nvidia-device-plugin-daemonset"); err != nil {
 			composableResourceLog.Error(err, "failed to restart nvidia-device-plugin-daemonset", "composableResource", resource.Name)
+			resource.Status.Error = err.Error()
+			if err := r.Status().Update(ctx, resource); err != nil {
+				return r.requeueOnErr(err, "failed to update composableResource", "composableResource", resource.Name)
+			}
 		}
 		if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-gpu-operator", "nvidia-dcgm"); err != nil {
 			composableResourceLog.Error(err, "failed to restart nvidia-dcgm", "composableResource", resource.Name)
+			resource.Status.Error = err.Error()
+			if err := r.Status().Update(ctx, resource); err != nil {
+				return r.requeueOnErr(err, "failed to update composableResource", "composableResource", resource.Name)
+			}
 		}
 	} else if deviceResourceType == "DRA" {
 		if err := utils.RunNvidiaSmi(ctx, r.Client, r.Clientset, r.RestConfig, resource.Spec.TargetNode); err != nil {
 			composableResourceLog.Error(err, "failed to run nvidia-smi in nvidia-driver-daemonset pod", "composableResource", resource.Name)
+			resource.Status.Error = err.Error()
+			if err := r.Status().Update(ctx, resource); err != nil {
+				return r.requeueOnErr(err, "failed to update composableResource", "composableResource", resource.Name)
+			}
 		}
 		if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-dra-driver-gpu", "nvidia-dra-driver-gpu-kubelet-plugin"); err != nil {
 			composableResourceLog.Error(err, "failed to restart nvidia-dra-driver-gpu-kubelet-plugin", "composableResource", resource.Name)
+			resource.Status.Error = err.Error()
+			if err := r.Status().Update(ctx, resource); err != nil {
+				return r.requeueOnErr(err, "failed to update composableResource", "composableResource", resource.Name)
+			}
 		}
 	} else {
 		err := fmt.Errorf("the env variable DEVICE_RESOURCE_TYPE has an invalid value: '%s'", deviceResourceType)
@@ -220,6 +236,7 @@ func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context,
 	}
 	if visible {
 		resource.Status.State = "Online"
+		resource.Status.Error = ""
 		return ctrl.Result{}, r.Status().Update(ctx, resource)
 	} else {
 		composableResourceLog.Info("waiting for the cluster to recognize the newly added device", "ComposableResource", resource.Name)

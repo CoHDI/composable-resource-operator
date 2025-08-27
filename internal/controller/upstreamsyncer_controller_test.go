@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	crov1alpha1 "github.com/IBM/composable-resource-operator/api/v1alpha1"
 	"github.com/agiledragon/gomonkey/v2"
 	metal3v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	machinev1beta1 "github.com/metal3-io/cluster-api-provider-metal3/api/v1beta1"
@@ -23,8 +24,6 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	crov1alpha1 "github.com/IBM/composable-resource-operator/api/v1alpha1"
 )
 
 var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
@@ -91,9 +90,11 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 			tenant_uuid  string
 			cluster_uuid string
 
-			setErrorMode  func()
-			extraHandling func()
+			isCreated          bool
+			missingDevicesTime map[string]time.Time
 
+			setErrorMode           func()
+			extraHandling          func()
 			expectedRequestStatus  *crov1alpha1.ComposableResourceStatus
 			expectedReconcileError string
 		}
@@ -103,10 +104,10 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 			os.Setenv("FTI_CDI_API_TYPE", "CM")
 
 			namespacesToCreate := []string{
-				"credentials-namespace",
+				"composable-resource-operator-system",
 				"openshift-machine-api",
 				"nvidia-gpu-operator",
-				"nvidia-dra-driver",
+				"nvidia-dra-driver-gpu",
 			}
 			for _, nsName := range namespacesToCreate {
 				ns := &corev1.Namespace{}
@@ -124,9 +125,10 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 
 			reconciler = &UpstreamSyncerReconciler{
-				Client:    k8sClient,
-				ClientSet: clientSet,
-				Scheme:    scheme.Scheme,
+				Client:         k8sClient,
+				ClientSet:      clientSet,
+				Scheme:         scheme.Scheme,
+				missingDevices: make(map[string]time.Time),
 			}
 
 			patches = gomonkey.NewPatches()
@@ -138,6 +140,10 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 
 			Expect(callFunction(tc.setErrorMode)).NotTo(HaveOccurred())
 			Expect(callFunction(tc.extraHandling)).NotTo(HaveOccurred())
+
+			if tc.missingDevicesTime != nil {
+				reconciler.missingDevices = tc.missingDevicesTime
+			}
 
 			var err error
 			adapter, err = NewComposableResourceAdapter(ctx, reconciler.Client, reconciler.ClientSet)
@@ -163,18 +169,20 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 						resourceName = composableResource.Name
 					}
 				}
-				Expect(find).To(BeTrue())
+				Expect(tc.isCreated).To(Equal(find))
 
-				controllerReconciler := &ComposableResourceReconciler{
-					Client:     k8sClient,
-					Clientset:  clientSet,
-					Scheme:     k8sClient.Scheme(),
-					RestConfig: cfg,
+				if tc.isCreated {
+					controllerReconciler := &ComposableResourceReconciler{
+						Client:     k8sClient,
+						Clientset:  clientSet,
+						Scheme:     k8sClient.Scheme(),
+						RestConfig: cfg,
+					}
+
+					composableResource, err := triggerComposableResourceReconcile(controllerReconciler, resourceName, false)
+					Expect(err).NotTo(HaveOccurred())
+					Expect(composableResource.Status.DeviceID).To(Equal("GPU-device00-uuid-temp-0000-000000000000"))
 				}
-
-				composableResource, err := triggerComposableResourceReconcile(controllerReconciler, resourceName, false)
-				Expect(err).NotTo(HaveOccurred())
-				Expect(composableResource.Status.State).To(Equal("Detaching"))
 			}
 
 			DeferCleanup(func() {
@@ -187,7 +195,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 				Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
 				Expect(k8sClient.DeleteAllOf(ctx, &machinev1beta1.Metal3Machine{}, client.InNamespace("openshift-machine-api"))).NotTo(HaveOccurred())
 				Expect(k8sClient.DeleteAllOf(ctx, &metal3v1alpha1.BareMetalHost{}, client.InNamespace("openshift-machine-api"))).NotTo(HaveOccurred())
-				Expect(k8sClient.DeleteAllOf(ctx, &corev1.Secret{}, client.InNamespace("credentials-namespace"))).NotTo(HaveOccurred())
+				Expect(k8sClient.DeleteAllOf(ctx, &corev1.Secret{}, client.InNamespace("composable-resource-operator-system"))).NotTo(HaveOccurred())
 
 				Expect(k8sClient.DeleteAllOf(ctx, &corev1.Pod{},
 					client.InNamespace("nvidia-gpu-operator"),
@@ -198,7 +206,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 					},
 				)).NotTo(HaveOccurred())
 				Expect(k8sClient.DeleteAllOf(ctx, &corev1.Pod{},
-					client.InNamespace("nvidia-dra-driver"),
+					client.InNamespace("nvidia-dra-driver-gpu"),
 					&client.DeleteAllOfOptions{
 						DeleteOptions: client.DeleteOptions{
 							GracePeriodSeconds: ptr.To(int64(0)),
@@ -206,7 +214,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 					},
 				)).NotTo(HaveOccurred())
 
-				Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("nvidia-dra-driver"))).NotTo(HaveOccurred())
+				Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("nvidia-dra-driver-gpu"))).NotTo(HaveOccurred())
 
 				Expect(k8sClient.DeleteAllOf(ctx, &resourcev1.ResourceSlice{})).NotTo(HaveOccurred())
 
@@ -281,7 +289,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 					secret := &corev1.Secret{
 						ObjectMeta: metav1.ObjectMeta{
 							Name:      "credentials",
-							Namespace: "credentials-namespace",
+							Namespace: "composable-resource-operator-system",
 						},
 						Type: corev1.SecretTypeOpaque,
 						Data: map[string][]byte{
@@ -297,7 +305,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 
 				expectedReconcileError: "failed to fetch data from upstream server: failed to process CM get request. http returned status: '404', cm return code: 'E02XXXX', error message: 'machine not found'",
 			}),
-			Entry("should successfully create a ComposableResource for detaching", testcase{
+			Entry("should wait when there is an extra device in upstram server because it needs to track with grace period", testcase{
 				tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
 				cluster_uuid: "cluster0-uuid-temp-0000-000000000000",
 
@@ -341,7 +349,133 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 					secret := &corev1.Secret{
 						ObjectMeta: metav1.ObjectMeta{
 							Name:      "credentials",
-							Namespace: "credentials-namespace",
+							Namespace: "composable-resource-operator-system",
+						},
+						Type: corev1.SecretTypeOpaque,
+						Data: map[string][]byte{
+							"username":      []byte("good_user"),
+							"password":      []byte("test_password"),
+							"client_id":     []byte("test_client_id"),
+							"client_secret": []byte("test_client_secret"),
+							"realm":         []byte("test_realm"),
+						},
+					}
+					Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+				},
+			}),
+			Entry("should wait when there is an extra device in upstram server because it is not exceeded grace period", testcase{
+				tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
+				cluster_uuid: "cluster0-uuid-temp-0000-000000000000",
+
+				missingDevicesTime: map[string]time.Time{
+					"GPU-device00-uuid-temp-0000-000000000000": time.Now().Add(-1 * time.Minute),
+				},
+				isCreated: false,
+
+				extraHandling: func() {
+					nodesToCreate := []*corev1.Node{
+						{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: baseComposableResource.Spec.TargetNode,
+								Annotations: map[string]string{
+									"machine.openshift.io/machine": "openshift-machine-api/machine-worker-0",
+								},
+							},
+						},
+					}
+					for _, node := range nodesToCreate {
+						Expect(k8sClient.Create(ctx, node)).To(Succeed())
+					}
+
+					machine0 := &machinev1beta1.Metal3Machine{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "machine-worker-0",
+							Namespace: "openshift-machine-api",
+							Annotations: map[string]string{
+								"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
+							},
+						},
+					}
+					Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
+
+					bmh0 := &metal3v1alpha1.BareMetalHost{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "bmh-worker-0",
+							Namespace: "openshift-machine-api",
+							Annotations: map[string]string{
+								"cluster-manager.cdi.io/machine": "machine0-uuid-temp-0000-000000000000",
+							},
+						},
+					}
+					Expect(k8sClient.Create(ctx, bmh0)).To(Succeed())
+
+					secret := &corev1.Secret{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "credentials",
+							Namespace: "composable-resource-operator-system",
+						},
+						Type: corev1.SecretTypeOpaque,
+						Data: map[string][]byte{
+							"username":      []byte("good_user"),
+							"password":      []byte("test_password"),
+							"client_id":     []byte("test_client_id"),
+							"client_secret": []byte("test_client_secret"),
+							"realm":         []byte("test_realm"),
+						},
+					}
+					Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+				},
+			}),
+			Entry("should successfully create a ComposableResource for detaching because it has exceeded grace period", testcase{
+				tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
+				cluster_uuid: "cluster0-uuid-temp-0000-000000000000",
+
+				missingDevicesTime: map[string]time.Time{
+					"GPU-device00-uuid-temp-0000-000000000000": time.Now().Add(-20 * time.Minute),
+				},
+				isCreated: true,
+
+				extraHandling: func() {
+					nodesToCreate := []*corev1.Node{
+						{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: baseComposableResource.Spec.TargetNode,
+								Annotations: map[string]string{
+									"machine.openshift.io/machine": "openshift-machine-api/machine-worker-0",
+								},
+							},
+						},
+					}
+					for _, node := range nodesToCreate {
+						Expect(k8sClient.Create(ctx, node)).To(Succeed())
+					}
+
+					machine0 := &machinev1beta1.Metal3Machine{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "machine-worker-0",
+							Namespace: "openshift-machine-api",
+							Annotations: map[string]string{
+								"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
+							},
+						},
+					}
+					Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
+
+					bmh0 := &metal3v1alpha1.BareMetalHost{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "bmh-worker-0",
+							Namespace: "openshift-machine-api",
+							Annotations: map[string]string{
+								"cluster-manager.cdi.io/machine": "machine0-uuid-temp-0000-000000000000",
+							},
+						},
+					}
+					Expect(k8sClient.Create(ctx, bmh0)).To(Succeed())
+
+					secret := &corev1.Secret{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "credentials",
+							Namespace: "composable-resource-operator-system",
 						},
 						Type: corev1.SecretTypeOpaque,
 						Data: map[string][]byte{

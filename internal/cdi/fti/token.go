@@ -80,7 +80,6 @@ func (t *CachedToken) GetToken() (*oauth2.Token, error) {
 }
 
 func (ts *CachedToken) Token() (*oauth2.Token, error) {
-	// TODO: Need to confirm credential's name and namespace.
 	namespace := "composable-resource-operator-system"
 	secretName := "credentials"
 

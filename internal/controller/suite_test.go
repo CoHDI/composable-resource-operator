@@ -188,7 +188,6 @@ var _ = BeforeSuite(func() {
 		ControlPlane: envtest.ControlPlane{
 			APIServer: &envtest.APIServer{
 				Args: []string{
-					"--runtime-config=resource.k8s.io/v1alpha3=true",
 					"--feature-gates=DynamicResourceAllocation=true",
 				},
 			},
