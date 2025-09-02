@@ -112,6 +112,15 @@ var _ = Describe("ComposabilityRequest Webhook", func() {
 			}
 			Expect(k8sClient.Create(ctx, composabilityRequest1)).NotTo(HaveOccurred())
 
+			composabilityRequest6 := &crov1alpha1.ComposabilityRequest{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-composability-request6"},
+				Spec: *func() *crov1alpha1.ComposabilityRequestSpec {
+					spec := baseComposabilityRequest.Spec.DeepCopy()
+					return spec
+				}(),
+			}
+			Expect(k8sClient.Create(ctx, composabilityRequest6)).NotTo(HaveOccurred())
+
 			composabilityRequest0 := &crov1alpha1.ComposabilityRequest{
 				ObjectMeta: metav1.ObjectMeta{Name: "test-composability-request0"},
 				Spec: *func() *crov1alpha1.ComposabilityRequestSpec {
@@ -119,9 +128,12 @@ var _ = Describe("ComposabilityRequest Webhook", func() {
 					return spec
 				}(),
 			}
-			Expect(k8sClient.Create(ctx, composabilityRequest0)).NotTo(HaveOccurred())
-			composabilityRequest0.Status = *baseComposabilityRequest.Status.DeepCopy()
-			Expect(k8sClient.Status().Update(ctx, composabilityRequest0)).NotTo(HaveOccurred())
+			err := k8sClient.Create(ctx, composabilityRequest0)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(Equal("admission webhook \"vcomposabilityrequest.kb.io\" denied the request: composabilityRequest resource test-composability-request6 with type gpu and model NVIDIA-A100-PCIE-80GB already exists"))
+
+			composabilityRequest6.Status = *baseComposabilityRequest.Status.DeepCopy()
+			Expect(k8sClient.Status().Update(ctx, composabilityRequest6)).NotTo(HaveOccurred())
 
 			composabilityRequest4 := &crov1alpha1.ComposabilityRequest{
 				ObjectMeta: metav1.ObjectMeta{Name: "test-composability-request4"},
@@ -141,9 +153,9 @@ var _ = Describe("ComposabilityRequest Webhook", func() {
 					return spec
 				}(),
 			}
-			err := k8sClient.Create(ctx, composabilityRequest2)
+			err = k8sClient.Create(ctx, composabilityRequest2)
 			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(Equal("admission webhook \"vcomposabilityrequest.kb.io\" denied the request: composabilityRequest resource test-composability-request0 with type gpu and model NVIDIA-A100-PCIE-80GB already exists"))
+			Expect(err.Error()).To(Equal("admission webhook \"vcomposabilityrequest.kb.io\" denied the request: composabilityRequest resource test-composability-request6 with type gpu and model NVIDIA-A100-PCIE-80GB already exists"))
 
 			composabilityRequest3 := &crov1alpha1.ComposabilityRequest{
 				ObjectMeta: metav1.ObjectMeta{Name: "test-composability-request3"},

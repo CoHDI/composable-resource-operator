@@ -121,8 +121,9 @@ func validateRequest(v *ComposabilityRequestCustomValidator, r *crov1alpha1.Comp
 			}
 		}
 	} else if r.Spec.Resource.AllocationPolicy == "samenode" {
-		var targetNode string
 		for _, composabilityRequest := range composabilityRequestList.Items {
+			var targetNode string
+
 			if composabilityRequest.Name == r.Name {
 				continue
 			}
