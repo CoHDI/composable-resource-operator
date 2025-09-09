@@ -171,8 +171,8 @@ func (r *ComposabilityRequestReconciler) handleNoneState(ctx context.Context, re
 	}
 
 	request.Status.State = "NodeAllocating"
-	request.Status.ScalarResource = request.Spec.Resource
 	request.Status.Error = ""
+	request.Status.ScalarResource = request.Spec.Resource
 	return ctrl.Result{}, r.Status().Update(ctx, request)
 }
 
@@ -446,6 +446,7 @@ func (r *ComposabilityRequestReconciler) handleNodeAllocatingState(ctx context.C
 
 	request.Status.State = "Updating"
 	request.Status.Error = ""
+	request.Status.ScalarResource = request.Spec.Resource
 	return ctrl.Result{}, r.Status().Update(ctx, request)
 }
 
@@ -516,6 +517,7 @@ func (r *ComposabilityRequestReconciler) handleUpdatingState(ctx context.Context
 	if canRun {
 		request.Status.State = "Running"
 		request.Status.Error = ""
+		request.Status.ScalarResource = request.Spec.Resource
 		return ctrl.Result{}, r.Status().Update(ctx, request)
 	} else {
 		composabilityRequestLog.Info("waiting for all ComposableResources to become online", "composabilityRequest", request.Name)
