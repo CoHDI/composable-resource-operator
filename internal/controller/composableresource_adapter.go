@@ -39,6 +39,11 @@ type ComposableResourceAdapter struct {
 func NewComposableResourceAdapter(ctx context.Context, client client.Client, clientSet *kubernetes.Clientset) (*ComposableResourceAdapter, error) {
 	var cdiProvider cdi.CdiProvider
 
+	deviceResourceType := os.Getenv("DEVICE_RESOURCE_TYPE")
+	if deviceResourceType != "DEVICE_PLUGIN" && deviceResourceType != "DRA" {
+		return nil, fmt.Errorf("the env variable DEVICE_RESOURCE_TYPE has an invalid value: '%s'", deviceResourceType)
+	}
+
 	switch cdiProviderType := os.Getenv("CDI_PROVIDER_TYPE"); cdiProviderType {
 	case "SUNFISH":
 		cdiProvider = sunfish.NewSunfishClient()

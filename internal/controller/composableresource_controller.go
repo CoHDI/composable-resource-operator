@@ -19,7 +19,6 @@ package controller
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"time"
 
@@ -217,13 +216,6 @@ func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context,
 				return r.requeueOnErr(err, "failed to update composableResource", "composableResource", resource.Name)
 			}
 		}
-	} else {
-		err := fmt.Errorf("the env variable DEVICE_RESOURCE_TYPE has an invalid value: '%s'", deviceResourceType)
-		resource.Status.Error = err.Error()
-		if err := r.Status().Update(ctx, resource); err != nil {
-			return r.requeueOnErr(err, "failed to update composableResource", "composableResource", resource.Name)
-		}
-		return r.requeueOnErr(err, "failed to check the env variable DEVICE_RESOURCE_TYPE value", "composableResource", resource.Name)
 	}
 
 	visible, err := utils.CheckGPUVisible(ctx, r.Client, r.Clientset, r.RestConfig, deviceResourceType, resource)
@@ -272,10 +264,6 @@ func (r *ComposableResourceReconciler) handleDetachingState(ctx context.Context,
 	composableResourceLog.Info("start handling Detaching state", "ComposableResource", resource.Name)
 
 	deviceResourceType := os.Getenv("DEVICE_RESOURCE_TYPE")
-	if deviceResourceType != "DEVICE_PLUGIN" && deviceResourceType != "DRA" {
-		err := fmt.Errorf("the env variable DEVICE_RESOURCE_TYPE has an invalid value: '%s'", deviceResourceType)
-		return r.requeueOnErr(err, "failed to check the env variable DEVICE_RESOURCE_TYPE value", "composableResource", resource.Name)
-	}
 
 	if resource.Status.DeviceID != "" {
 		// Make sure there is no load on the target GPU.

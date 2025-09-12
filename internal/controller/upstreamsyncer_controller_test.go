@@ -118,6 +118,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 		BeforeAll(func() {
 			os.Setenv("CDI_PROVIDER_TYPE", "FTI_CDI")
 			os.Setenv("FTI_CDI_API_TYPE", "CM")
+			os.Setenv("DEVICE_RESOURCE_TYPE", "DEVICE_PLUGIN")
 
 			namespacesToCreate := []string{
 				"composable-resource-operator-system",
