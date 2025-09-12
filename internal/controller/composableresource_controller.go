@@ -255,6 +255,11 @@ func (r *ComposableResourceReconciler) handleOnlineState(ctx context.Context, re
 		if err := r.Status().Update(ctx, resource); err != nil {
 			return r.requeueOnErr(err, "failed to update ComposableResource", "ComposableResource", resource.Name)
 		}
+	} else {
+		resource.Status.Error = ""
+		if err := r.Status().Update(ctx, resource); err != nil {
+			return r.requeueOnErr(err, "failed to update ComposableResource", "ComposableResource", resource.Name)
+		}
 	}
 
 	return r.requeueAfter(30*time.Second, nil)
