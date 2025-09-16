@@ -178,10 +178,10 @@ func (f *FTIClient) AddResource(instance *v1alpha1.ComposableResource) (deviceID
 		for _, spec := range resource.Spec.Condition {
 			if spec.Column == "model" && spec.Operator == "eq" && spec.Value == instance.Spec.Model {
 				if resource.OptionStatus == "0" {
-					return resource.ResourceUUID, resource.ResourceUUID, nil
+					return resource.SerialNum, resource.ResourceUUID, nil
 				} else if resource.OptionStatus == "1" {
 					clientLog.Info("the FM attached device called is in Warning state in FM", "ComposableResource", instance.Name)
-					return resource.ResourceUUID, resource.ResourceUUID, nil
+					return resource.SerialNum, resource.ResourceUUID, nil
 				} else if resource.OptionStatus == "2" {
 					err := fmt.Errorf("the FM attached device called by %s is in Critical state in FM", instance.Name)
 					clientLog.Error(err, "failed to attach device", "ComposableResource", instance.Name)
@@ -303,7 +303,7 @@ func (f *FTIClient) CheckResource(instance *v1alpha1.ComposableResource) error {
 				continue
 			}
 
-			if resource.ResourceUUID == instance.Status.DeviceID {
+			if resource.SerialNum == instance.Status.DeviceID {
 				if resource.OptionStatus == "0" {
 					// The target device exists and has no error, return OK.
 					return nil

@@ -181,7 +181,7 @@ func generateCMMachineData(isAttachFailed bool, isDetachFailed bool, isSucceeded
 				Detail: fticmapi.DeviceDetail{
 					FabricUUID:       "",
 					FabricID:         0,
-					ResourceUUID:     "",
+					ResourceUUID:     "GPU-device00-uuid-temp-fail-000000000res",
 					FabricGID:        "",
 					ResourceType:     "",
 					ResourceName:     "",
@@ -212,7 +212,7 @@ func generateCMMachineData(isAttachFailed bool, isDetachFailed bool, isSucceeded
 				Detail: fticmapi.DeviceDetail{
 					FabricUUID:       "",
 					FabricID:         0,
-					ResourceUUID:     "",
+					ResourceUUID:     "GPU-device00-uuid-temp-fail-000000000res",
 					FabricGID:        "",
 					ResourceType:     "",
 					ResourceName:     "",
@@ -243,7 +243,7 @@ func generateCMMachineData(isAttachFailed bool, isDetachFailed bool, isSucceeded
 				Detail: fticmapi.DeviceDetail{
 					FabricUUID:       "",
 					FabricID:         0,
-					ResourceUUID:     "",
+					ResourceUUID:     "GPU-device00-uuid-temp-0000-000000000res",
 					FabricGID:        "",
 					ResourceType:     "",
 					ResourceName:     "",
@@ -276,7 +276,7 @@ func generateCMMachineData(isAttachFailed bool, isDetachFailed bool, isSucceeded
 					Detail: fticmapi.DeviceDetail{
 						FabricUUID:       "",
 						FabricID:         0,
-						ResourceUUID:     "",
+						ResourceUUID:     "GPU-device00-uuid-temp-0000-000000000res",
 						FabricGID:        "",
 						ResourceType:     "",
 						ResourceName:     "",
@@ -305,7 +305,7 @@ func generateCMMachineData(isAttachFailed bool, isDetachFailed bool, isSucceeded
 					Detail: fticmapi.DeviceDetail{
 						FabricUUID:       "",
 						FabricID:         0,
-						ResourceUUID:     "",
+						ResourceUUID:     "GPU-device00-uuid-temp-0000-000000000res",
 						FabricGID:        "",
 						ResourceType:     "",
 						ResourceName:     "",
@@ -334,7 +334,7 @@ func generateCMMachineData(isAttachFailed bool, isDetachFailed bool, isSucceeded
 					Detail: fticmapi.DeviceDetail{
 						FabricUUID:       "",
 						FabricID:         0,
-						ResourceUUID:     "",
+						ResourceUUID:     "GPU-device00-uuid-temp-0000-000000000res",
 						FabricGID:        "",
 						ResourceType:     "",
 						ResourceName:     "",
@@ -409,12 +409,12 @@ func generateFMMachineData(state string) []byte {
 
 	if state == "isNormal" {
 		data.Data.Machines[0].Resources = append(data.Data.Machines[0].Resources, ftifmapi.GetMachineResource{
-			ResourceUUID: "GPU-device00-uuid-temp-0000-000000000000",
+			ResourceUUID: "GPU-device00-uuid-temp-0000-000000000res",
 			ResourceName: "",
 			Type:         "gpu",
 			Status:       0,
 			OptionStatus: "0",
-			SerialNum:    "",
+			SerialNum:    "GPU-device00-uuid-temp-0000-000000000000",
 			Spec: ftifmapi.Condition{
 				Condition: []ftifmapi.ConditionItem{
 					{
@@ -427,12 +427,12 @@ func generateFMMachineData(state string) []byte {
 		})
 	} else if state == "isWarning" {
 		data.Data.Machines[0].Resources = append(data.Data.Machines[0].Resources, ftifmapi.GetMachineResource{
-			ResourceUUID: "GPU-device00-uuid-temp-0000-000000000000",
+			ResourceUUID: "GPU-device00-uuid-temp-0000-000000000res",
 			ResourceName: "",
 			Type:         "gpu",
 			Status:       0,
 			OptionStatus: "1",
-			SerialNum:    "",
+			SerialNum:    "GPU-device00-uuid-temp-0000-000000000000",
 			Spec: ftifmapi.Condition{
 				Condition: []ftifmapi.ConditionItem{
 					{
@@ -445,12 +445,12 @@ func generateFMMachineData(state string) []byte {
 		})
 	} else if state == "isCritical" {
 		data.Data.Machines[0].Resources = append(data.Data.Machines[0].Resources, ftifmapi.GetMachineResource{
-			ResourceUUID: "GPU-device00-uuid-temp-0000-000000000000",
+			ResourceUUID: "GPU-device00-uuid-temp-0000-000000000res",
 			ResourceName: "",
 			Type:         "gpu",
 			Status:       0,
 			OptionStatus: "2",
-			SerialNum:    "",
+			SerialNum:    "GPU-device00-uuid-temp-0000-000000000000",
 			Spec: ftifmapi.Condition{
 				Condition: []ftifmapi.ConditionItem{
 					{
@@ -463,12 +463,12 @@ func generateFMMachineData(state string) []byte {
 		})
 	} else if state == "isUnknown" {
 		data.Data.Machines[0].Resources = append(data.Data.Machines[0].Resources, ftifmapi.GetMachineResource{
-			ResourceUUID: "GPU-device00-uuid-temp-0000-000000000000",
+			ResourceUUID: "GPU-device00-uuid-temp-0000-000000000res",
 			ResourceName: "",
 			Type:         "gpu",
 			Status:       0,
 			OptionStatus: "3",
-			SerialNum:    "",
+			SerialNum:    "GPU-device00-uuid-temp-0000-000000000000",
 			Spec: ftifmapi.Condition{
 				Condition: []ftifmapi.ConditionItem{
 					{
@@ -505,12 +505,12 @@ func generateFMUpdateData(state string) []byte {
 
 	if state == "isAdded" {
 		data.Data.Machines[0].Resources = append(data.Data.Machines[0].Resources, ftifmapi.ScaleUpResponseResourceItem{
-			ResourceUUID: "GPU-device00-uuid-temp-0000-000000000000",
+			ResourceUUID: "GPU-device00-uuid-temp-0000-000000000res",
 			ResourceName: "",
 			Type:         "gpu",
 			Status:       0,
 			OptionStatus: "0",
-			SerialNum:    "",
+			SerialNum:    "GPU-device00-uuid-temp-0000-000000000000",
 			Spec: ftifmapi.Condition{
 				Condition: []ftifmapi.ConditionItem{
 					{
@@ -523,12 +523,12 @@ func generateFMUpdateData(state string) []byte {
 		})
 	} else if state == "isAddedWarning" {
 		data.Data.Machines[0].Resources = append(data.Data.Machines[0].Resources, ftifmapi.ScaleUpResponseResourceItem{
-			ResourceUUID: "GPU-device00-uuid-temp-0000-000000000000",
+			ResourceUUID: "GPU-device00-uuid-temp-0000-000000000res",
 			ResourceName: "",
 			Type:         "gpu",
 			Status:       0,
 			OptionStatus: "1",
-			SerialNum:    "",
+			SerialNum:    "GPU-device00-uuid-temp-0000-000000000000",
 			Spec: ftifmapi.Condition{
 				Condition: []ftifmapi.ConditionItem{
 					{
@@ -541,12 +541,12 @@ func generateFMUpdateData(state string) []byte {
 		})
 	} else if state == "isAddedCritical" {
 		data.Data.Machines[0].Resources = append(data.Data.Machines[0].Resources, ftifmapi.ScaleUpResponseResourceItem{
-			ResourceUUID: "GPU-device00-uuid-temp-0000-000000000000",
+			ResourceUUID: "GPU-device00-uuid-temp-0000-000000000res",
 			ResourceName: "",
 			Type:         "gpu",
 			Status:       0,
 			OptionStatus: "2",
-			SerialNum:    "",
+			SerialNum:    "GPU-device00-uuid-temp-0000-000000000000",
 			Spec: ftifmapi.Condition{
 				Condition: []ftifmapi.ConditionItem{
 					{
@@ -559,12 +559,12 @@ func generateFMUpdateData(state string) []byte {
 		})
 	} else if state == "isAddedUnknown" {
 		data.Data.Machines[0].Resources = append(data.Data.Machines[0].Resources, ftifmapi.ScaleUpResponseResourceItem{
-			ResourceUUID: "GPU-device00-uuid-temp-0000-000000000000",
+			ResourceUUID: "GPU-device00-uuid-temp-0000-000000000res",
 			ResourceName: "",
 			Type:         "gpu",
 			Status:       0,
 			OptionStatus: "3",
-			SerialNum:    "",
+			SerialNum:    "GPU-device00-uuid-temp-0000-000000000000",
 			Spec: ftifmapi.Condition{
 				Condition: []ftifmapi.ConditionItem{
 					{
@@ -2219,7 +2219,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Attaching"
 						composableResourceStatus.Error = "no Pod with label 'app.kubernetes.io/component=nvidia-driver' found on node worker-0"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -2318,7 +2318,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Attaching"
 						composableResourceStatus.Error = "daemonsets.apps \"nvidia-dra-driver-gpu-kubelet-plugin\" not found"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -2442,7 +2442,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.State = "Attaching"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -2569,7 +2569,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.State = "Attaching"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -2707,7 +2707,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.State = "Attaching"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -2835,7 +2835,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Attaching"
 						composableResourceStatus.Error = "failed to parse restartedAt annotation for DaemonSet nvidia-dra-driver-gpu/nvidia-dra-driver-gpu-kubelet-plugin: 'parsing time \"error\" as \"2006-01-02T15:04:05Z07:00\": cannot parse \"error\" as \"2006\"'"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -2984,7 +2984,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -3014,7 +3014,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.Error = "this is an error message"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 
 						return composableResourceStatus
 					}(),
@@ -3026,7 +3026,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Detaching"
 						composableResourceStatus.Error = "this is an error message"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -3039,7 +3039,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 
 						return composableResourceStatus
 					}(),
@@ -3183,7 +3183,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -6405,7 +6405,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Attaching"
 						composableResourceStatus.Error = "daemonsets.apps \"nvidia-dcgm\" not found"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -6581,7 +6581,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.State = "Attaching"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -6927,7 +6927,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -7103,7 +7103,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -7456,7 +7456,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -7518,7 +7518,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -7608,7 +7608,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -7671,7 +7671,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.Error = "the target gpu 'GPU-device00-uuid-temp-0000-000000000000' is showing a Warning status in FM"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),

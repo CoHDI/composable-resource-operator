@@ -125,9 +125,9 @@ func (f *FTIClient) AddResource(instance *v1alpha1.ComposableResource) (deviceID
 		return "", "", err
 	}
 
-	matchingSpecUUID, machingSpecDeviceCount, unusedDeviceUUID, unusedDeviceErrorMessage := checkAddingResources(machineData, composableResourceList, instance)
+	matchingSpecUUID, machingSpecDeviceCount, unusedDeviceUUID, unusedResourceUUID, unusedDeviceErrorMessage := checkAddingResources(machineData, composableResourceList, instance)
 	if unusedDeviceUUID != "" {
-		return unusedDeviceUUID, unusedDeviceUUID, unusedDeviceErrorMessage
+		return unusedDeviceUUID, unusedResourceUUID, unusedDeviceErrorMessage
 	}
 
 	scaleUpRequest := scaleUpRequestBody{
@@ -429,7 +429,7 @@ func (f *FTIClient) getMachineInfo(machineID string) (*fticmapi.Data, error) {
 	return &machineData.Data, nil
 }
 
-func checkAddingResources(machineData *fticmapi.Data, composableResourceList *v1alpha1.ComposableResourceList, instance *v1alpha1.ComposableResource) (string, int, string, error) {
+func checkAddingResources(machineData *fticmapi.Data, composableResourceList *v1alpha1.ComposableResourceList, instance *v1alpha1.ComposableResource) (string, int, string, string, error) {
 	existingDevices := make(map[string]bool)
 	for _, resource := range composableResourceList.Items {
 		existingDevices[resource.Status.DeviceID] = true
@@ -444,9 +444,9 @@ func checkAddingResources(machineData *fticmapi.Data, composableResourceList *v1
 
 		if unusedDevice := findAvailableDevice(resourceSpec, existingDevices); unusedDevice != nil {
 			if unusedDevice.Status == addComplete {
-				return "", 0, unusedDevice.DeviceUUID, nil
+				return "", 0, unusedDevice.DeviceUUID, unusedDevice.Detail.ResourceUUID, nil
 			} else if unusedDevice.Status == addFailed {
-				return "", 0, unusedDevice.DeviceUUID, fmt.Errorf("an error occurred with the resource in CM: '%s'", unusedDevice.StatusReason)
+				return "", 0, unusedDevice.DeviceUUID, unusedDevice.Detail.ResourceUUID, fmt.Errorf("an error occurred with the resource in CM: '%s'", unusedDevice.StatusReason)
 			}
 		}
 
@@ -455,7 +455,7 @@ func checkAddingResources(machineData *fticmapi.Data, composableResourceList *v1
 		break
 	}
 
-	return specUUID, deviceCount, "", nil
+	return specUUID, deviceCount, "", "", nil
 }
 
 func checkRemovingResources(machineData *fticmapi.Data, instance *v1alpha1.ComposableResource) (string, int, error) {

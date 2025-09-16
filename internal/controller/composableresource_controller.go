@@ -131,7 +131,6 @@ func (r *ComposableResourceReconciler) handleNoneState(ctx context.Context, reso
 	if deviceID, ok := resource.Labels["cohdi.io/ready-to-detach-device-uuid"]; ok && deviceID != "" {
 		composableResourceLog.Info("detected ready-to-detach-device-uuid label, add device_uuid", "ComposableResource", resource.Name, "deviceID", deviceID)
 		resource.Status.DeviceID = deviceID
-		resource.Status.CDIDeviceID = deviceID
 	}
 
 	resource.Status.State = "Attaching"
