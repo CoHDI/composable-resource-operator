@@ -258,7 +258,7 @@ func (f *FTIClient) RemoveResource(instance *v1alpha1.ComposableResource) error 
 							ResourceSpecs: []ftifmapi.ScaleDownResourceSpecItem{
 								{
 									Type:         instance.Spec.Type,
-									ResourceUUID: instance.Status.DeviceID,
+									ResourceUUID: instance.Status.CDIDeviceID,
 									Num:          1,
 								},
 							},
