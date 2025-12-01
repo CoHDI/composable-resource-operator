@@ -139,6 +139,12 @@ func (r *ComposabilityRequestReconciler) handleComposabilityRequestChange(ctx co
 }
 
 func (r *ComposabilityRequestReconciler) handleComposableResourceChange(ctx context.Context, composableResource *crov1alpha1.ComposableResource) (ctrl.Result, error) {
+	detachDeviceUUID := composableResource.ObjectMeta.GetLabels()["cohdi.io/ready-to-detach-device-uuid"]
+	if detachDeviceUUID != "" {
+		composabilityRequestLog.Info("ready-to-detach composableResource is not managed by any composabilityRequest, just ignore it", "composableResource", composableResource.Name)
+		return r.doNotRequeue()
+	}
+
 	composabilityRequestName := composableResource.ObjectMeta.GetLabels()["app.kubernetes.io/managed-by"]
 	composabilityRequest := &crov1alpha1.ComposabilityRequest{}
 	if err := r.Get(ctx, types.NamespacedName{Name: composabilityRequestName}, composabilityRequest); err != nil {
