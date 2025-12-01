@@ -190,7 +190,7 @@ func DrainGPU(ctx context.Context, c client.Client, clientset *kubernetes.Client
 				cmd  []string
 				desc string
 			}{
-				{[]string{"/usr/bin/nvidia-smi", "-i", targetGPUUUID, "-pm", "0"}, "disable persistence mode"},
+				{[]string{"/usr/sbin/chroot", "/driver-root", "/usr/bin/nvidia-smi", "-i", targetGPUUUID, "-pm", "0"}, "disable persistence mode"},
 			}
 			for _, step := range disableCommand {
 				_, stdErr, execErr := execCommandInPod(
@@ -291,6 +291,7 @@ done;
 				}
 			} else {
 				// Detach gpu with nvidia-smi command.
+				busIDForSysfs := strings.ToLower(targetGPUBusID)
 				detachCommands := []struct {
 					cmd  []string
 					desc string
@@ -298,7 +299,7 @@ done;
 					{[]string{"/usr/sbin/chroot", "/driver-root", "/usr/bin/nvidia-smi", "drain", "-p", targetGPUBusID, "-m", "1"}, "set maintenance mode"},
 					{[]string{"/usr/sbin/chroot", "/driver-root", "/usr/sbin/modprobe", "-r", "nvidia_drm"}, "remove nvidia_drm module"},
 					{[]string{"/usr/sbin/chroot", "/driver-root", "/usr/sbin/modprobe", "-r", "nvidia_uvm"}, "remove nvidia_uvm module"},
-					{[]string{"/usr/bin/echo", "1", ">", "/sys/bus/pci/devices/" + targetGPUBusID + "/remove"}, "reset GPU"},
+					{[]string{"/bin/sh", "-c", fmt.Sprintf("/usr/bin/echo 1 | /usr/bin/tee /sys/bus/pci/devices/%s/remove > /dev/null", busIDForSysfs)}, "reset GPU"},
 				}
 				for _, step := range detachCommands {
 					_, stderr, execErr := execCommandInPod(
@@ -616,7 +617,7 @@ func RunNvidiaSmi(ctx context.Context, c client.Client, clientset *kubernetes.Cl
 			return err
 		}
 	}
-
+	gpusLog.Info("Run nvidia-smi successfully", "target_node_name", targetNodeName)
 	return nil
 }
 
