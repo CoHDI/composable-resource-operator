@@ -24,6 +24,7 @@ import (
 	"runtime"
 	"testing"
 
+	gpuv1 "github.com/NVIDIA/gpu-operator/api/v1"
 	metal3v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	machinev1beta1 "github.com/metal3-io/cluster-api-provider-metal3/api/v1beta1"
 	. "github.com/onsi/ginkgo/v2"
@@ -168,6 +169,7 @@ var _ = BeforeSuite(func() {
 	goModCache := filepath.Join(homedir.HomeDir(), "go", "pkg", "mod")
 	machineCRDPath := filepath.Join(goModCache, "github.com", "metal3-io", "cluster-api-provider-metal3@v1.9.3", "config", "crd", "bases")
 	bmhCRDPath := filepath.Join(goModCache, "github.com", "metal3-io", "baremetal-operator@v0.9.1", "config", "base", "crds", "bases")
+	nvidiaCRDPath := filepath.Join(goModCache, "github.com", "!n!v!i!d!i!a", "gpu-operator@v1.11.1", "config", "crd", "bases")
 
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
@@ -175,6 +177,7 @@ var _ = BeforeSuite(func() {
 			filepath.Join("..", "..", "config", "crd", "bases"),
 			machineCRDPath,
 			bmhCRDPath,
+			nvidiaCRDPath,
 		},
 		ErrorIfCRDPathMissing: true,
 
@@ -204,6 +207,7 @@ var _ = BeforeSuite(func() {
 	Expect(crov1alpha1.AddToScheme(s)).NotTo(HaveOccurred())
 	Expect(machinev1beta1.AddToScheme(s)).NotTo(HaveOccurred())
 	Expect(metal3v1alpha1.AddToScheme(s)).NotTo(HaveOccurred())
+	Expect(gpuv1.AddToScheme(s)).NotTo(HaveOccurred())
 
 	// +kubebuilder:scaffold:scheme
 

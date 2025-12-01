@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	gpuv1 "github.com/NVIDIA/gpu-operator/api/v1"
 	"github.com/agiledragon/gomonkey/v2"
 	metal3v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	machinev1beta1 "github.com/metal3-io/cluster-api-provider-metal3/api/v1beta1"
@@ -1128,6 +1129,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 					cleanAllComposableResources()
 
+					Expect(k8sClient.DeleteAllOf(ctx, &gpuv1.ClusterPolicy{})).NotTo(HaveOccurred())
+
 					patches.Reset()
 				})
 			},
@@ -2212,6 +2215,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, draDaemonset)).NotTo(HaveOccurred())
+
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
 					},
 
 					expectedRequestStatus: func() *crov1alpha1.ComposableResourceStatus {
@@ -2426,6 +2444,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, draDaemonset)).NotTo(HaveOccurred())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
@@ -2552,6 +2585,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, draDaemonset)).NotTo(HaveOccurred())
+
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
@@ -2690,6 +2738,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						Expect(k8sClient.Create(ctx, draDaemonsetToCreate)).NotTo(HaveOccurred())
 						draDaemonsetToCreate.Status = *draDaemonset.Status.DeepCopy()
 						Expect(k8sClient.Status().Update(ctx, draDaemonsetToCreate)).To(Succeed())
+
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
@@ -3925,6 +3988,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 					cleanAllComposableResources()
 
+					Expect(k8sClient.DeleteAllOf(ctx, &gpuv1.ClusterPolicy{})).NotTo(HaveOccurred())
+
 					patches.Reset()
 				})
 			},
@@ -4089,6 +4154,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, resourceSlice)).NotTo(HaveOccurred())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
@@ -4164,6 +4244,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, resourceSlice)).NotTo(HaveOccurred())
+
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
@@ -4265,6 +4360,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, resourceSlice)).NotTo(HaveOccurred())
+
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
@@ -4419,6 +4529,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, resourceSlice)).NotTo(HaveOccurred())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
@@ -4571,6 +4696,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, resourceSlice)).NotTo(HaveOccurred())
+
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
@@ -4725,6 +4865,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, resourceSlice)).NotTo(HaveOccurred())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
@@ -4877,6 +5032,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, resourceSlice)).NotTo(HaveOccurred())
+
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
@@ -5036,6 +5206,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, resourceSlice)).NotTo(HaveOccurred())
+
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
@@ -5215,6 +5400,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResource.Status.DeviceID = "GPU-device00-uuid-temp-0000-111100000000"
 						Expect(k8sClient.Status().Update(ctx, composableResource)).NotTo(HaveOccurred())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
@@ -5393,6 +5593,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, resourceSlice)).NotTo(HaveOccurred())
+
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
@@ -7922,6 +8137,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 					cleanAllComposableResources()
 
+					Expect(k8sClient.DeleteAllOf(ctx, &gpuv1.ClusterPolicy{})).NotTo(HaveOccurred())
+
 					patches.Reset()
 				})
 			},
@@ -8061,6 +8278,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
@@ -8111,6 +8343,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
@@ -8224,6 +8471,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
@@ -8334,6 +8596,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
@@ -8464,6 +8741,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						Expect(k8sClient.Create(ctx, composableResource)).To(Succeed())
 						composableResource.Status.DeviceID = "GPU-device00-uuid-temp-0000-111100000000"
 						Expect(k8sClient.Status().Update(ctx, composableResource)).NotTo(HaveOccurred())
+
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
@@ -8619,6 +8911,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						Expect(k8sClient.Create(ctx, composableResource)).To(Succeed())
 						composableResource.Status.DeviceID = "GPU-device00-uuid-temp-0000-111100000000"
 						Expect(k8sClient.Status().Update(ctx, composableResource)).NotTo(HaveOccurred())
+
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
@@ -8783,6 +9090,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, dcgmDaemonset)).NotTo(HaveOccurred())
+
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,

@@ -63,6 +63,7 @@ var composableResourceLog = ctrl.Log.WithName("composable_resource_controller")
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get,resourceNames=credentials
 // +kubebuilder:rbac:groups=resource.k8s.io,resources=resourceslices,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=resource.k8s.io,resources=resourceslices/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=nvidia.com,resources=clusterpolicies,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -155,6 +156,11 @@ func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context,
 
 	deviceResourceType := os.Getenv("DEVICE_RESOURCE_TYPE")
 
+	isK8S := false
+	if os.Getenv("FTI_CDI_CLUSTER_ID") == "" {
+		isK8S = true
+	}
+
 	if resource.Status.DeviceID == "" {
 		deviceID, CDIDeviceID, err := adapter.CDIProvider.AddResource(resource)
 		if err != nil {
@@ -197,7 +203,7 @@ func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context,
 			}
 		}
 	} else if deviceResourceType == "DRA" {
-		if err := utils.RunNvidiaSmi(ctx, r.Client, r.Clientset, r.RestConfig, resource.Spec.TargetNode); err != nil {
+		if err := utils.RunNvidiaSmi(ctx, r.Client, r.Clientset, r.RestConfig, resource.Spec.TargetNode, isK8S); err != nil {
 			composableResourceLog.Error(err, "failed to run nvidia-smi in nvidia-driver-daemonset pod", "composableResource", resource.Name)
 			resource.Status.Error = err.Error()
 			if err := r.Status().Update(ctx, resource); err != nil {
@@ -261,6 +267,11 @@ func (r *ComposableResourceReconciler) handleDetachingState(ctx context.Context,
 
 	deviceResourceType := os.Getenv("DEVICE_RESOURCE_TYPE")
 
+	isK8S := false
+	if os.Getenv("FTI_CDI_CLUSTER_ID") == "" {
+		isK8S = true
+	}
+
 	if resource.Status.DeviceID != "" {
 		// Make sure there is no load on the target GPU.
 		if !resource.Spec.ForceDetach {
@@ -286,7 +297,7 @@ func (r *ComposableResourceReconciler) handleDetachingState(ctx context.Context,
 		}
 
 		// Use nvidia-smi to remove gpu from the target node.
-		if err := utils.DrainGPU(ctx, r.Client, r.Clientset, r.RestConfig, resource.Spec.TargetNode, resource.Status.DeviceID, deviceResourceType); err != nil {
+		if err := utils.DrainGPU(ctx, r.Client, r.Clientset, r.RestConfig, resource.Spec.TargetNode, resource.Status.DeviceID, deviceResourceType, isK8S); err != nil {
 			return r.requeueOnErr(resource, err, "failed to drain target gpu", "deviceID", resource.Status.DeviceID, "composableResource", resource.Name)
 		}
 
