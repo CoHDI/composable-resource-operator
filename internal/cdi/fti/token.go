@@ -28,10 +28,14 @@ import (
 	"sync"
 	"time"
 
+	ctrl "sigs.k8s.io/controller-runtime"
+
 	"golang.org/x/oauth2"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
+
+var tokenLog = ctrl.Log.WithName("fti_token")
 
 const tokenRequestTimeout = 30 * time.Second
 
@@ -92,6 +96,7 @@ func (t *CachedToken) GetToken() (*oauth2.Token, error) {
 
 	// Update cache.
 	t.token = token
+	tokenLog.Info("successfully re-obtained token")
 	return token, nil
 }
 
