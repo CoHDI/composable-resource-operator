@@ -583,18 +583,6 @@ func generateFMUpdateData(state string) []byte {
 	return jsonData
 }
 
-func generateFMError() []byte {
-	data := ftifmapi.ErrorBody{
-		Code:    "E02XXXX",
-		Message: "fm internal error",
-	}
-
-	jsonData, err := json.Marshal(data)
-	Expect(err).NotTo(HaveOccurred())
-
-	return jsonData
-}
-
 var baseComposableResource = crov1alpha1.ComposableResource{
 	Spec: crov1alpha1.ComposableResourceSpec{
 		Type:        "gpu",
@@ -834,7 +822,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 			case "/fabric_manager/api/v1/machines/machine0-uuid-temp-fail-000000000000/update":
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusNotFound)
-				w.Write([]byte(`{"code":"E02XXXX","message":"scaleup method not found"}`))
+				w.Write([]byte(`{"status":404,"detail":{"code":"E02XXXX","message":"scaleup method not found"}}`))
 
 			case "/fabric_manager/api/v1/machines/machine0-uuid-temp-fail-000000000001/update":
 				w.Header().Set("Content-Type", "text/html")
@@ -869,7 +857,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 			case "/fabric_manager/api/v1/machines/machine0-uuid-temp-fail-000000000000":
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusNotFound)
-				w.Write([]byte(`{"code":"E02XXXX","message":"machine not found"}`))
+				w.Write([]byte(`{"status":404,"detail":{"code":"E02XXXX","message":"machine not found"}}`))
 
 			case "/fabric_manager/api/v1/machines/machine0-uuid-temp-fail-000000000001":
 				w.Header().Set("Content-Type", "text/html")
@@ -7489,7 +7477,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					expectedRequestStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.State = "Online"
-						composableResourceStatus.Error = "failed to process FM get request. FM return code: 'E02XXXX', error message: 'machine not found'"
+						composableResourceStatus.Error = "failed to process FM get request. FM returned code: 'E02XXXX', error message: 'machine not found'"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
 						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
 						return composableResourceStatus
@@ -8482,7 +8470,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						)
 					},
 
-					expectedReconcileError: "failed to process scaledown request. FM returned code: E02XXXX, error message: scaleup method not found",
+					expectedReconcileError: "failed to process FM scaledown request. FM returned code: 'E02XXXX', error message: 'scaleup method not found'",
 				}),
 				Entry("should fail when trying to send scaledown request to FM because the FM returns a non-JSON formatted error message", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",

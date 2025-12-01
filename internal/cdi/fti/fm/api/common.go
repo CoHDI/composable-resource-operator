@@ -16,6 +16,8 @@
 
 package api
 
+import "encoding/json"
+
 type Condition struct {
 	Condition []ConditionItem `json:"condition"`
 }
@@ -27,6 +29,12 @@ type ConditionItem struct {
 }
 
 type ErrorBody struct {
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Status int         `json:"status"`
+	Detail ErrorDetail `json:"detail"`
+}
+
+type ErrorDetail struct {
+	Code    string          `json:"code"`
+	Message json.RawMessage `json:"message"`
+	Data    map[string]any  `json:"data"`
 }
