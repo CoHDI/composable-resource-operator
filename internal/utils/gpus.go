@@ -84,7 +84,9 @@ func CheckGPUVisible(ctx context.Context, client client.Client, clientset *kuber
 func CheckNoGPULoads(ctx context.Context, client client.Client, clientset *kubernetes.Clientset, restConfig *rest.Config, targetNodeName string, targetGPUUUID *string) error {
 	pod, err := getNvidiaDriverDaemonsetPod(ctx, client, targetNodeName)
 	if err != nil {
-		return err
+		// If the nvidia-driver-daemonset Pod is not found, it means that there is no GPU on the node, so there is no load.
+		gpusLog.Info("nvidia-driver-daemonset Pod is not found, it means that there is no GPU on the node, so there is no load, skip it", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
+		return nil
 	}
 
 	command := []string{"/usr/bin/nvidia-smi", "--query-compute-apps=gpu_uuid,process_name", "--format=csv,noheader,nounits"}
@@ -150,7 +152,8 @@ func DrainGPU(ctx context.Context, c client.Client, clientset *kubernetes.Client
 			// RKE2 + DRA
 			draPod, err := getDRAKubeletPluginPod(ctx, clientset, targetNodeName)
 			if err != nil {
-				return err
+				gpusLog.Info("nvidia-dra-driver-gpu-kubelet-plugin Pod is not found, it means that there is no GPU on the node, so no need to drain, skip it", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
+				return nil
 			}
 
 			// Get information about the GPU to be drained.
@@ -317,7 +320,8 @@ done;
 			// OCP (K8S) + DRA
 			nvidiaPod, err := getNvidiaDriverDaemonsetPod(ctx, c, targetNodeName)
 			if err != nil {
-				return err
+				gpusLog.Info("nvidia-driver-daemonset Pod is not found, it means that there is no GPU on the node, so no need to drain, skip it", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
+				return nil
 			}
 
 			// Get information about the GPU to be drained.

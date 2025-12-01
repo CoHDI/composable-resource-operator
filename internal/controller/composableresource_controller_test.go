@@ -3993,21 +3993,6 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					patches.Reset()
 				})
 			},
-				Entry("should fail when checking gpu loads because nvidia-driver-daemonset pod can not be found", testcase{
-					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
-					cluster_uuid: "cluster0-uuid-temp-0000-000000000000",
-
-					resourceName: "test-composable-resource",
-					resourceSpec: baseComposableResource.Spec.DeepCopy(),
-					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
-						composableResourceStatus := baseComposableResource.Status.DeepCopy()
-						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						return composableResourceStatus
-					}(),
-
-					expectedReconcileError: "no Pod with label 'app.kubernetes.io/component=nvidia-driver' found on node worker-0",
-				}),
 				Entry("should fail when checking gpu loads because nvidia-smi command failed", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
 					cluster_uuid: "cluster0-uuid-temp-0000-000000000000",
@@ -8142,21 +8127,6 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					patches.Reset()
 				})
 			},
-				Entry("should fail when checking gpu loads because nvidia-driver-daemonset pod can not be found", testcase{
-					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
-					cluster_uuid: "cluster0-uuid-temp-0000-000000000000",
-
-					resourceName: "test-composable-resource",
-					resourceSpec: baseComposableResource.Spec.DeepCopy(),
-					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
-						composableResourceStatus := baseComposableResource.Status.DeepCopy()
-						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						return composableResourceStatus
-					}(),
-
-					expectedReconcileError: "no Pod with label 'app.kubernetes.io/component=nvidia-driver' found on node worker-0",
-				}),
 				Entry("should fail when checking gpu loads because nvidia-smi command failed", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
 					cluster_uuid: "cluster0-uuid-temp-0000-000000000000",
