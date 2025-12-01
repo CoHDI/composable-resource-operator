@@ -54,7 +54,7 @@ func RestartDaemonset(ctx context.Context, client client.Client, namespace strin
 	if ok {
 		lastRestartTime, err := time.Parse(time.RFC3339, restartedAt)
 		if err == nil {
-			if time.Since(lastRestartTime) <= 5*time.Minute {
+			if time.Since(lastRestartTime) <= 10*time.Second {
 				nodesLog.Info("skip restart because daemonSet already restarted recently", "namespace", namespace, "name", name, "restartedAt", restartedAt)
 				return nil
 			}
