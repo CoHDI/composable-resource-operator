@@ -390,10 +390,20 @@ func (f *FTIClient) GetResources() (deviceInfoList []cdi.DeviceInfo, err error) 
 				continue
 			}
 
+			model := ""
+			// Extract model from resource.Spec.Condition
+			for _, condition := range resource.Spec.Condition {
+				if condition.Column == "model" && condition.Operator == "eq" {
+					model = condition.Value
+					break
+				}
+			}
+
 			deviceInfoList = append(deviceInfoList, cdi.DeviceInfo{
 				NodeName:    node.Name,
 				MachineUUID: machineID,
 				DeviceType:  resource.Type,
+				Model:       model,
 				DeviceID:    resource.SerialNum,
 				CDIDeviceID: resource.ResourceUUID,
 			})

@@ -26,6 +26,7 @@ type DeviceInfo struct {
 	NodeName    string
 	MachineUUID string
 	DeviceType  string
+	Model       string
 	DeviceID    string
 	CDIDeviceID string
 }

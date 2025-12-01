@@ -129,11 +129,14 @@ func (r *ComposableResourceReconciler) handleNoneState(ctx context.Context, reso
 		}
 	}
 
-	if deviceID, ok := resource.Labels["cohdi.io/ready-to-detach-device-uuid"]; ok && deviceID != "" {
-		composableResourceLog.Info("detected ready-to-detach-device-uuid label, add device_uuid", "ComposableResource", resource.Name, "deviceID", deviceID)
+	if deviceID, ok := resource.Labels["cohdi.io/ready-to-detach-device-id"]; ok && deviceID != "" {
+		composableResourceLog.Info("detected ready-to-detach-device-id label, add deviceID", "ComposableResource", resource.Name, "deviceID", deviceID)
 		resource.Status.DeviceID = deviceID
+		if CDIDeviceID, ok := resource.Labels["cohdi.io/ready-to-detach-cdi-device-id"]; ok && CDIDeviceID != "" {
+			composableResourceLog.Info("detected ready-to-detach-cdi-device-id label, add CDIDeviceID", "ComposableResource", resource.Name, "CDIDeviceID", CDIDeviceID)
+			resource.Status.CDIDeviceID = CDIDeviceID
+		}
 	}
-
 	resource.Status.State = "Attaching"
 	resource.Status.Error = ""
 	return ctrl.Result{}, r.Status().Update(ctx, resource)
@@ -241,7 +244,7 @@ func (r *ComposableResourceReconciler) handleOnlineState(ctx context.Context, re
 		return ctrl.Result{}, r.Status().Update(ctx, resource)
 	}
 
-	if deviceID, ok := resource.Labels["cohdi.io/ready-to-detach-device-uuid"]; ok && deviceID != "" {
+	if deviceID, ok := resource.Labels["cohdi.io/ready-to-detach-device-id"]; ok && deviceID != "" {
 		resource.Status.State = "Detaching"
 		return ctrl.Result{}, r.Status().Update(ctx, resource)
 	}

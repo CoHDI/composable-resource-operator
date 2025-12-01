@@ -140,11 +140,13 @@ func (r *UpstreamSyncerReconciler) createDetachCR(ctx context.Context, deviceInf
 		ObjectMeta: ctrl.ObjectMeta{
 			GenerateName: utils.GenerateComposableResourceName("gpu"),
 			Labels: map[string]string{
-				"cohdi.io/ready-to-detach-device-uuid": deviceInfo.DeviceID,
+				"cohdi.io/ready-to-detach-device-id":     deviceInfo.DeviceID,
+				"cohdi.io/ready-to-detach-cdi-device-id": deviceInfo.CDIDeviceID,
 			},
 		},
 		Spec: crov1alpha1.ComposableResourceSpec{
 			Type:        deviceInfo.DeviceType,
+			Model:       deviceInfo.Model,
 			TargetNode:  deviceInfo.NodeName,
 			ForceDetach: false,
 		},

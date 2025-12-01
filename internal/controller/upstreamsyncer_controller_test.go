@@ -181,7 +181,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 				find := false
 				resourceName := ""
 				for _, composableResource := range composableResourceList.Items {
-					if composableResource.Labels["cohdi.io/ready-to-detach-device-uuid"] == "GPU-device00-uuid-temp-0000-000000000000" {
+					if composableResource.Labels["cohdi.io/ready-to-detach-device-id"] == "GPU-device00-uuid-temp-0000-000000000000" {
 						find = true
 						resourceName = composableResource.Name
 					}
