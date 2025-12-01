@@ -34,6 +34,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	crov1alpha1 "github.com/CoHDI/composable-resource-operator/api/v1alpha1"
+	v1alpha3 "k8s.io/api/resource/v1alpha3"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 var gpusLog = ctrl.Log.WithName("utils_gpus")
@@ -618,43 +620,64 @@ func RunNvidiaSmi(ctx context.Context, c client.Client, clientset *kubernetes.Cl
 	return nil
 }
 
-func CreateDeviceTaint(ctx context.Context, client client.Client, resource *crov1alpha1.ComposableResource) error {
-	resourceSliceList := &resourcev1.ResourceSliceList{}
-	if err := client.List(ctx, resourceSliceList); err != nil {
+func CreateDeviceTaint(ctx context.Context, c client.Client, resource *crov1alpha1.ComposableResource) error {
+	taintName := fmt.Sprintf("%s-taint", resource.Name)
+
+	existing := &v1alpha3.DeviceTaintRule{}
+	err := c.Get(ctx, client.ObjectKey{Name: taintName}, existing)
+	if err == nil {
+		return nil
+	} else if !apierrors.IsNotFound(err) {
 		return err
 	}
 
-	desiredTaint := resourcev1.DeviceTaint{
-		Key:    "k8s.io/device-uuid",
-		Value:  resource.Status.DeviceID,
-		Effect: resourcev1.DeviceTaintEffectNoSchedule,
+	celExpr := fmt.Sprintf(`device.attributes["gpu.nvidia.com"].uuid == "%s"`, resource.Status.DeviceID)
+
+	taintRule := &v1alpha3.DeviceTaintRule{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: taintName,
+		},
+		Spec: v1alpha3.DeviceTaintRuleSpec{
+			DeviceSelector: &v1alpha3.DeviceTaintSelector{
+				Selectors: []v1alpha3.DeviceSelector{
+					{
+						CEL: &v1alpha3.CELDeviceSelector{
+							Expression: celExpr,
+						},
+					},
+				},
+			},
+			Taint: v1alpha3.DeviceTaint{
+				Key:    "k8s.io/device-uuid",
+				Value:  resource.Status.DeviceID,
+				Effect: v1alpha3.DeviceTaintEffectNoSchedule,
+			},
+		},
 	}
 
-	for i := range resourceSliceList.Items {
-		rs := &resourceSliceList.Items[i]
-		for j := range rs.Spec.Devices {
-			device := &rs.Spec.Devices[j]
-			for attrName, attrValue := range device.Attributes {
-				if attrName != "uuid" || *attrValue.StringValue != resource.Status.DeviceID {
-					continue
-				}
-
-				for _, existingTaint := range device.Taints {
-					if existingTaint.Key == desiredTaint.Key {
-						return nil
-					}
-				}
-
-				device.Taints = append(device.Taints, desiredTaint)
-				if err := client.Update(ctx, rs); err != nil {
-					return err
-				}
-				return nil
-			}
-		}
+	if err := c.Create(ctx, taintRule); err != nil {
+		return fmt.Errorf("failed to create DeviceTaintRule %s: %w", taintName, err)
 	}
 
-	return fmt.Errorf("failed to create device taint for resource %s: can not found device '%s' in ResourceSlices", resource.Name, resource.Status.DeviceID)
+	return nil
+}
+
+func DeleteDeviceTaint(ctx context.Context, c client.Client, resource *crov1alpha1.ComposableResource) error {
+	taintName := fmt.Sprintf("%s-taint", resource.Name)
+
+	taintRule := &v1alpha3.DeviceTaintRule{}
+	err := c.Get(ctx, client.ObjectKey{Name: taintName}, taintRule)
+	if apierrors.IsNotFound(err) {
+		return nil
+	} else if err != nil {
+		return fmt.Errorf("failed to get DeviceTaintRule %s: %w", taintName, err)
+	}
+
+	if err := c.Delete(ctx, taintRule); err != nil {
+		return fmt.Errorf("failed to delete DeviceTaintRule %s: %w", taintName, err)
+	}
+
+	return nil
 }
 
 func execCommandInPod(ctx context.Context, clientset *kubernetes.Clientset, restConfig *rest.Config, namespace string, podName string, containerName string, command []string) (string, string, error) {

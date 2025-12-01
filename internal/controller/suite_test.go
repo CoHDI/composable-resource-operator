@@ -40,6 +40,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	crov1alpha1 "github.com/CoHDI/composable-resource-operator/api/v1alpha1"
+	v1alpha3 "k8s.io/api/resource/v1alpha3"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -192,6 +193,7 @@ var _ = BeforeSuite(func() {
 			APIServer: &envtest.APIServer{
 				Args: []string{
 					"--feature-gates=DynamicResourceAllocation=true",
+					"--runtime-config=resource.k8s.io/v1alpha3=true",
 				},
 			},
 		},
@@ -208,6 +210,7 @@ var _ = BeforeSuite(func() {
 	Expect(machinev1beta1.AddToScheme(s)).NotTo(HaveOccurred())
 	Expect(metal3v1alpha1.AddToScheme(s)).NotTo(HaveOccurred())
 	Expect(gpuv1.AddToScheme(s)).NotTo(HaveOccurred())
+	Expect(v1alpha3.AddToScheme(s)).NotTo(HaveOccurred())
 
 	// +kubebuilder:scaffold:scheme
 

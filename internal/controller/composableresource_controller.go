@@ -292,7 +292,7 @@ func (r *ComposableResourceReconciler) handleDetachingState(ctx context.Context,
 		// Create a DeviceTaintRule to block the GPU from being re-scheduled.
 		if deviceResourceType == "DRA" {
 			if err := utils.CreateDeviceTaint(ctx, r.Client, resource); err != nil {
-				return r.requeueOnErr(resource, err, "failed to add DeviceTaint", "composableResource", resource.Name)
+				return r.requeueOnErr(resource, err, "failed to create DeviceTaintRule", "composableResource", resource.Name)
 			}
 		}
 
@@ -312,6 +312,12 @@ func (r *ComposableResourceReconciler) handleDetachingState(ctx context.Context,
 		}
 
 		composableResourceLog.Info("the device has been removed", "ComposableResource", resource.Name)
+
+		if deviceResourceType == "DRA" {
+			if err := utils.DeleteDeviceTaint(ctx, r.Client, resource); err != nil {
+				return r.requeueOnErr(resource, err, "failed to delete DeviceTaintRule", "composableResource", resource.Name)
+			}
+		}
 
 		resource.Status.Error = ""
 		resource.Status.DeviceID = ""
