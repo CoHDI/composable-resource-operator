@@ -222,6 +222,25 @@ func (f *FTIClient) RemoveResource(instance *v1alpha1.ComposableResource) error 
 		return err
 	}
 
+	machineData, err := f.getMachineInfo(machineID)
+	if err != nil {
+		clientLog.Error(err, "failed to get MachineInfo from FM for resource existence check", "ComposableResource", instance.Name)
+		return err
+	}
+
+	resourceExists := false
+	for _, resource := range machineData.Machines[0].Resources {
+		if resource.Type == instance.Spec.Type && resource.ResourceUUID == instance.Status.CDIDeviceID {
+			resourceExists = true
+			break
+		}
+	}
+
+	if !resourceExists {
+		clientLog.Info("resource does not exist in FM, skipping removal", "ComposableResource", instance.Name, "CDIDeviceID", instance.Status.CDIDeviceID)
+		return nil
+	}
+
 	token, err := f.token.GetToken()
 	if err != nil {
 		clientLog.Error(err, "failed to get authentication token for FM scaledown", "ComposableResource", instance.Name)

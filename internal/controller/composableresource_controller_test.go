@@ -854,6 +854,16 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				w.WriteHeader(http.StatusOK)
 				w.Write(generateFMUpdateData(""))
 
+			case "/fabric_manager/api/v1/machines/machine0-uuid-temp-fail-000000000007/update":
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				w.Write([]byte(`{"status":404,"detail":{"code":"E02XXXX","message":"scaledown method not found"}}`))
+
+			case "/fabric_manager/api/v1/machines/machine0-uuid-temp-fail-000000000008/update":
+				w.Header().Set("Content-Type", "text/html")
+				w.WriteHeader(http.StatusNotFound)
+				w.Write([]byte("<html><body>This is not JSON!</body></html>"))
+
 			case "/fabric_manager/api/v1/machines/machine0-uuid-temp-fail-000000000000":
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusNotFound)
@@ -888,6 +898,16 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 				w.Write(generateFMMachineData("isUnknown"))
+
+			case "/fabric_manager/api/v1/machines/machine0-uuid-temp-fail-000000000007":
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				w.Write(generateFMMachineData("isNormal"))
+
+			case "/fabric_manager/api/v1/machines/machine0-uuid-temp-fail-000000000008":
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				w.Write(generateFMMachineData("isNormal"))
 
 			case "/fabric_manager/api/v1/machines/machine0-uuid-temp-0000-000000000000":
 				w.Header().Set("Content-Type", "application/json")
@@ -3321,7 +3341,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -3346,7 +3366,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.Error = "metal3machines.infrastructure.cluster.x-k8s.io \"machine-worker-0\" not found"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -3359,7 +3379,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -3422,7 +3442,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.Error = "failed to process CM get request. http returned status: '404', cm return code: 'E02XXXX', error message: 'machine not found'"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -3435,7 +3455,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -3498,7 +3518,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.Error = "the target device 'GPU-device00-uuid-temp-0000-000000000000' cannot be found in CDI system"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -3511,7 +3531,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -3574,7 +3594,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.Error = "the target gpu 'GPU-device00-uuid-temp-0000-000000000000' is showing a Warning status in CM"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -3587,7 +3607,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -3650,7 +3670,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.Error = "the target gpu 'GPU-device00-uuid-temp-0000-000000000000' is showing a Critical status in CM"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -3663,7 +3683,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -3726,7 +3746,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.Error = "the target gpu 'GPU-device00-uuid-temp-0000-000000000000' has unknown status '3' in CM"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -3739,7 +3759,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -3801,7 +3821,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -3830,7 +3850,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						composableResourceStatus.Error = "some error message"
 						return composableResourceStatus
 					}(),
@@ -3893,7 +3913,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -3990,7 +4010,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -4035,7 +4055,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -4080,7 +4100,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -4171,7 +4191,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -4270,7 +4290,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -4386,7 +4406,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -4554,7 +4574,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -4722,7 +4742,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -4890,7 +4910,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -5051,7 +5071,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.State = "Detaching"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -5064,7 +5084,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-fail-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-fail-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-fail-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -5226,7 +5246,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Detaching"
 						composableResourceStatus.Error = "remove failed due to some reasons"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-fail-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-fail-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-fail-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -5239,7 +5259,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -5425,7 +5445,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -7378,7 +7398,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -7403,7 +7423,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.Error = "metal3machines.infrastructure.cluster.x-k8s.io \"machine-worker-0\" not found"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -7416,7 +7436,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -7479,7 +7499,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.Error = "failed to process FM get request. FM returned code: 'E02XXXX', error message: 'machine not found'"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -7492,7 +7512,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -7555,7 +7575,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.Error = "failed to unmarshal FM get error response body into errBody. Original error: invalid character '<' looking for beginning of value"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -7568,7 +7588,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -7631,7 +7651,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.Error = "failed to unmarshal FM get machine response body into machineData: invalid character '<' looking for beginning of value"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -7719,7 +7739,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -7782,7 +7802,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.Error = "the target device 'GPU-device00-uuid-temp-0000-000000000000' cannot be found in CDI system"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -7872,7 +7892,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -7935,7 +7955,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.Error = "the target gpu 'GPU-device00-uuid-temp-0000-000000000000' is showing a Critical status in FM"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -7948,7 +7968,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -8011,7 +8031,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.Error = "the target gpu 'GPU-device00-uuid-temp-0000-000000000000' has unknown status '3' in FM"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -8124,7 +8144,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -8169,7 +8189,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -8214,7 +8234,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -8280,7 +8300,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -8355,7 +8375,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -8407,7 +8427,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								Name:      "bmh-worker-0",
 								Namespace: "openshift-machine-api",
 								Annotations: map[string]string{
-									"cluster-manager.cdi.io/machine": "machine0-uuid-temp-fail-000000000000",
+									"cluster-manager.cdi.io/machine": "machine0-uuid-temp-fail-000000000007",
 								},
 							},
 						}
@@ -8470,7 +8490,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						)
 					},
 
-					expectedReconcileError: "failed to process FM scaledown request. FM returned code: 'E02XXXX', error message: 'scaleup method not found'",
+					expectedReconcileError: "failed to process FM scaledown request. FM returned code: 'E02XXXX', error message: 'scaledown method not found'",
 				}),
 				Entry("should fail when trying to send scaledown request to FM because the FM returns a non-JSON formatted error message", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -8481,7 +8501,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -8533,7 +8553,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								Name:      "bmh-worker-0",
 								Namespace: "openshift-machine-api",
 								Annotations: map[string]string{
-									"cluster-manager.cdi.io/machine": "machine0-uuid-temp-fail-000000000001",
+									"cluster-manager.cdi.io/machine": "machine0-uuid-temp-fail-000000000008",
 								},
 							},
 						}
@@ -8608,7 +8628,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -8752,7 +8772,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -8923,7 +8943,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -9379,7 +9399,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 					composableResourceStatus := baseComposableResource.Status.DeepCopy()
 					composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-					composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+					composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 					return composableResourceStatus
 				}(),
 				resourceState: "Detaching",
