@@ -343,7 +343,7 @@ func (f *FTIClient) GetResources() (deviceInfoList []cdi.DeviceInfo, err error) 
 					MachineUUID: machineID,
 					DeviceType:  resourceSpec.Type,
 					DeviceID:    device.DeviceUUID,
-					CDIDeviceID: device.DeviceUUID,
+					CDIDeviceID: device.Detail.ResourceUUID,
 				})
 			}
 		}
