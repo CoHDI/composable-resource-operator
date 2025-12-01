@@ -332,7 +332,7 @@ func CreateDeviceTaint(ctx context.Context, client client.Client, resource *crov
 				}
 
 				for _, existingTaint := range device.Taints {
-					if existingTaint == desiredTaint {
+					if existingTaint.Key == desiredTaint.Key {
 						return nil
 					}
 				}
