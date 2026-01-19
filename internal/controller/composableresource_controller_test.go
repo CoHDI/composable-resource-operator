@@ -5912,18 +5912,6 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					cleanAllComposableResources()
 				})
 			},
-				Entry("should fail because targetNode can not be found in cluster", testcase{
-					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
-					cluster_uuid: "cluster0-uuid-temp-0000-000000000000",
-
-					resourceName:   "test-composable-resource",
-					resourceSpec:   baseComposableResource.Spec.DeepCopy(),
-					resourceStatus: baseComposableResource.Status.DeepCopy(),
-
-					extraHandling: deleteComposableResource,
-
-					expectedReconcileError: "nodes \"worker-0\" not found",
-				}),
 				Entry("should succeed when the ComposableResource can be directly deleted", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
 					cluster_uuid: "cluster0-uuid-temp-0000-000000000000",
@@ -5948,39 +5936,6 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 					},
-				}),
-				Entry("should wait when the ComposableResource can not be directly deleted", testcase{
-					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
-					cluster_uuid: "cluster0-uuid-temp-0000-000000000000",
-
-					resourceName:   "test-composable-resource",
-					resourceSpec:   baseComposableResource.Spec.DeepCopy(),
-					resourceStatus: baseComposableResource.Status.DeepCopy(),
-
-					extraHandling: func(composableResourceName string) {
-						deleteComposableResource(composableResourceName)
-
-						nodesToCreate := []*corev1.Node{
-							{
-								ObjectMeta: metav1.ObjectMeta{
-									Name: baseComposableResource.Spec.TargetNode,
-								},
-								Spec: corev1.NodeSpec{
-									Unschedulable: true,
-								},
-							},
-						}
-						for _, node := range nodesToCreate {
-							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
-							Expect(k8sClient.Create(ctx, node)).To(Succeed())
-						}
-					},
-
-					expectedRequestStatus: func() *crov1alpha1.ComposableResourceStatus {
-						composableResourceStatus := baseComposableResource.Status.DeepCopy()
-						composableResourceStatus.State = "Deleting"
-						return composableResourceStatus
-					}(),
 				}),
 			)
 		})

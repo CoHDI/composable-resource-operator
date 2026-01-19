@@ -422,14 +422,6 @@ func (r *ComposableResourceReconciler) handleDetachingState(ctx context.Context,
 func (r *ComposableResourceReconciler) handleDeletingState(ctx context.Context, resource *crov1alpha1.ComposableResource) (ctrl.Result, error) {
 	composableResourceLog.Info("start handling Deleting state", "ComposableResource", resource.Name)
 
-	needScheduleUpdate, err := utils.SetNodeSchedulable(ctx, r.Client, resource)
-	if err != nil {
-		return r.requeueOnErr(resource, err, "failed to set node schedulable", "composableResource", resource.Name)
-	}
-	if needScheduleUpdate {
-		return r.requeueAfter(30*time.Second, nil)
-	}
-
 	if controllerutil.ContainsFinalizer(resource, composabilityRequestFinalizer) {
 		controllerutil.RemoveFinalizer(resource, composabilityRequestFinalizer)
 	}

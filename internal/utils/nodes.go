@@ -113,24 +113,6 @@ func CheckNodeCapacitySufficient(ctx context.Context, client client.Client, node
 	return true, nil
 }
 
-func SetNodeSchedulable(ctx context.Context, client client.Client, request *v1alpha1.ComposableResource) (bool, error) {
-	node := &corev1.Node{}
-	if err := client.Get(ctx, types.NamespacedName{Name: request.Spec.TargetNode}, node); err != nil {
-		return false, err
-	}
-
-	if node.Spec.Unschedulable {
-		node.Spec.Unschedulable = false
-		if err := client.Update(ctx, node); err != nil {
-			return true, err
-		}
-
-		return true, nil
-	}
-
-	return false, nil
-}
-
 func GetAllNodes(ctx context.Context, client client.Client) (*corev1.NodeList, error) {
 	nodeList := &corev1.NodeList{}
 	if err := client.List(ctx, nodeList); err != nil {
