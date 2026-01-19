@@ -215,11 +215,6 @@ func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context,
 
 	deviceResourceType := os.Getenv("DEVICE_RESOURCE_TYPE")
 
-	isK8S := false
-	if os.Getenv("FTI_CDI_CLUSTER_ID") == "" {
-		isK8S = true
-	}
-
 	if resource.Status.DeviceID == "" {
 		deviceID, CDIDeviceID, err := adapter.CDIProvider.AddResource(resource)
 		if err != nil {
@@ -262,8 +257,8 @@ func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context,
 			}
 		}
 	} else if deviceResourceType == "DRA" {
-		if err := utils.RunNvidiaSmi(ctx, r.Client, r.Clientset, r.RestConfig, resource.Spec.TargetNode, isK8S); err != nil {
-			composableResourceLog.Error(err, "failed to run nvidia-smi in nvidia-driver-daemonset pod", "composableResource", resource.Name)
+		if err := utils.RunNvidiaSmi(ctx, r.Client, r.Clientset, r.RestConfig, resource.Spec.TargetNode); err != nil {
+			composableResourceLog.Error(err, "failed to run nvidia-smi", "composableResource", resource.Name)
 			resource.Status.Error = err.Error()
 			if err := r.Status().Update(ctx, resource); err != nil {
 				return r.requeueOnErr(resource, err, "failed to update composableResource", "composableResource", resource.Name)
@@ -328,11 +323,6 @@ func (r *ComposableResourceReconciler) handleDetachingState(ctx context.Context,
 
 	deviceResourceType := os.Getenv("DEVICE_RESOURCE_TYPE")
 
-	isK8S := false
-	if os.Getenv("FTI_CDI_CLUSTER_ID") == "" {
-		isK8S = true
-	}
-
 	if resource.Status.DeviceID != "" {
 		// Make sure there is no load on the target GPU.
 		if !resource.Spec.ForceDetach {
@@ -358,7 +348,7 @@ func (r *ComposableResourceReconciler) handleDetachingState(ctx context.Context,
 		}
 
 		// Use nvidia-smi to remove gpu from the target node.
-		if err := utils.DrainGPU(ctx, r.Client, r.Clientset, r.RestConfig, resource.Spec.TargetNode, resource.Status.DeviceID, deviceResourceType, isK8S); err != nil {
+		if err := utils.DrainGPU(ctx, r.Client, r.Clientset, r.RestConfig, resource.Spec.TargetNode, resource.Status.DeviceID, deviceResourceType); err != nil {
 			return r.requeueOnErr(resource, err, "failed to drain target gpu", "deviceID", resource.Status.DeviceID, "composableResource", resource.Name)
 		}
 

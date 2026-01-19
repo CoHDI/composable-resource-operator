@@ -2386,6 +2386,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
@@ -4138,6 +4153,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
@@ -4150,7 +4180,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						)
 					},
 
-					expectedReconcileError: "run nvidia-smi in pod 'nvidia-driver-daemonset-test' to check gpu loads failed: '<nil>', stderr: 'nvidia-smi: command not found'",
+					expectedReconcileError: "run nvidia-smi in pod 'nvidia-driver-daemonset-test' to check gpu loads failed: '<nil>', stderr: 'nvidia-smi: command not found', stdout: ''",
 				}),
 				Entry("should fail when checking gpu loads because there are gpu loads existed", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -4186,6 +4216,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
@@ -4198,7 +4243,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						)
 					},
 
-					expectedReconcileError: "found gpu load on gpu 'GPU-device00-uuid-temp-0000-000000000000': [GPUUUID: 'GPU-device00-uuid-temp-0000-000000000000', ProcessName: 'gpu_load_progress']",
+					expectedReconcileError: "found gpu loads on node 'worker-0': '[GPUUUID: 'GPU-device00-uuid-temp-0000-000000000000', ProcessName: 'gpu_load_progress']'",
 				}),
 				Entry("should fail when draining gpu because the nvidiaX file is being occupied", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -4280,7 +4325,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -4374,7 +4419,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -4498,7 +4543,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -4676,7 +4721,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -4854,7 +4899,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -5033,7 +5078,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -5210,7 +5255,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -5408,7 +5453,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -5614,7 +5659,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -5817,7 +5862,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -7148,7 +7193,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						)
 					},
 
-					expectedReconcileError: "get gpu info command failed: err='<nil>', stderr='nvidia-smi: command not found'",
+					expectedReconcileError: "get gpu info command failed: err: '<nil>', stderr: 'nvidia-smi: command not found', stdout: ''",
 				}),
 				Entry("should successfully enter Online state when the added gpu has been recognized by cluster", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -8405,6 +8450,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
@@ -8417,7 +8477,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						)
 					},
 
-					expectedReconcileError: "run nvidia-smi in pod 'nvidia-driver-daemonset-test' to check gpu loads failed: '<nil>', stderr: 'nvidia-smi: command not found'",
+					expectedReconcileError: "run nvidia-smi in pod 'nvidia-driver-daemonset-test' to check gpu loads failed: '<nil>', stderr: 'nvidia-smi: command not found', stdout: ''",
 				}),
 				Entry("should fail when checking gpu loads because there are gpu loads existed", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -8453,6 +8513,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
@@ -8538,7 +8613,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -8623,7 +8698,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -8771,7 +8846,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -8910,7 +8985,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -9063,7 +9138,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -9241,7 +9316,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -9428,7 +9503,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -9883,7 +9958,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 							if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 								return newMockExecutor("", "")
-							} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+							} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 								return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 							} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 								return newMockExecutor("", "")
