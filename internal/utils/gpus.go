@@ -633,7 +633,32 @@ func CreateDeviceTaint(ctx context.Context, c client.Client, resource *crov1alph
 		return err
 	}
 
-	celExpr := fmt.Sprintf(`device.attributes["gpu.nvidia.com"].uuid == "%s"`, resource.Status.DeviceID)
+	resourceSliceList := &resourcev1.ResourceSliceList{}
+	if err := c.List(ctx, resourceSliceList); err != nil {
+		return err
+	}
+	var (
+		driverName string
+		poolName   string
+		deviceName string
+	)
+Loop:
+	for _, rs := range resourceSliceList.Items {
+		for _, device := range rs.Spec.Devices {
+			for attrName, attrValue := range device.Attributes {
+				if attrName == "uuid" && attrValue.StringValue != nil && *attrValue.StringValue == resource.Status.DeviceID {
+					driverName = rs.Spec.Driver
+					poolName = rs.Spec.Pool.Name
+					deviceName = device.Name
+					break Loop
+				}
+			}
+		}
+	}
+	if deviceName == "" {
+		gpusLog.Info("skip creating DeviceTaintRule: device not found in ResourceSlices", "uuid", resource.Status.DeviceID)
+		return nil
+	}
 
 	taintRule := &v1alpha3.DeviceTaintRule{
 		ObjectMeta: metav1.ObjectMeta{
@@ -641,13 +666,9 @@ func CreateDeviceTaint(ctx context.Context, c client.Client, resource *crov1alph
 		},
 		Spec: v1alpha3.DeviceTaintRuleSpec{
 			DeviceSelector: &v1alpha3.DeviceTaintSelector{
-				Selectors: []v1alpha3.DeviceSelector{
-					{
-						CEL: &v1alpha3.CELDeviceSelector{
-							Expression: celExpr,
-						},
-					},
-				},
+				Driver: &driverName,
+				Pool:   &poolName,
+				Device: &deviceName,
 			},
 			Taint: v1alpha3.DeviceTaint{
 				Key:    "k8s.io/device-uuid",
