@@ -44,7 +44,7 @@ import (
 
 var (
 	clientLog        = ctrl.Log.WithName("fti_fm_client")
-	fmRequestTimeout = 60 * time.Second
+	fmRequestTimeout = 180 * time.Second
 )
 
 type FTIClient struct {
