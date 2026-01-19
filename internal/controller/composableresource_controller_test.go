@@ -39,6 +39,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -1008,6 +1009,10 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				os.Setenv("FTI_CDI_TENANT_ID", "tenant00-uuid-temp-0000-000000000000")
 				os.Setenv("FTI_CDI_CLUSTER_ID", "cluster0-uuid-temp-0000-000000000000")
 
+				Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
+
+				Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: baseComposableResource.Spec.TargetNode}})).To(Succeed())
+
 				createComposableResource(tc.resourceName, tc.resourceSpec, nil, "")
 
 				Expect(callFunction(tc.setErrorMode)).NotTo(HaveOccurred())
@@ -1036,6 +1041,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				Entry("should successfully enter Attaching state", testcase{
 					resourceName: "test-composable-resource",
 					resourceSpec: baseComposableResource.Spec.DeepCopy(),
+
+					setErrorMode: func() {},
 
 					expectedRequestFinalizer: []string{composabilityRequestFinalizer},
 					expectedRequestStatus: func() *crov1alpha1.ComposableResourceStatus {
@@ -1075,10 +1082,33 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 				expectedRequestStatus  *crov1alpha1.ComposableResourceStatus
 				expectedReconcileError string
+				expectedRequestDeleted bool
 			}
 
 			BeforeAll(func() {
 				patches = gomonkey.NewPatches()
+			})
+
+			BeforeEach(func() {
+				node := &corev1.Node{}
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+				if k8serrors.IsNotFound(err) {
+					Expect(k8sClient.Create(ctx, &corev1.Node{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: worker0Name,
+							Annotations: map[string]string{
+								"machine.openshift.io/machine": "openshift-machine-api/machine-worker-0",
+							},
+						},
+					})).To(Succeed())
+				} else {
+					Expect(err).NotTo(HaveOccurred())
+					if node.Annotations == nil {
+						node.Annotations = map[string]string{}
+					}
+					node.Annotations["machine.openshift.io/machine"] = "openshift-machine-api/machine-worker-0"
+					Expect(k8sClient.Update(ctx, node)).To(Succeed())
+				}
 			})
 
 			DescribeTable("", func(tc testcase) {
@@ -1095,6 +1125,10 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				if tc.expectedReconcileError != "" {
 					Expect(err).To(HaveOccurred())
 					Expect(err.Error()).To(Equal(tc.expectedReconcileError))
+				} else if tc.expectedRequestDeleted {
+					Expect(err).NotTo(HaveOccurred())
+					Expect(composableResource).NotTo(BeNil())
+					Expect(composableResource.DeletionTimestamp).NotTo(BeNil())
 				} else {
 					Expect(err).NotTo(HaveOccurred())
 					Expect(composableResource.Status).To(Equal(*tc.expectedRequestStatus))
@@ -1150,7 +1184,11 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceSpec:   baseComposableResource.Spec.DeepCopy(),
 					resourceStatus: baseComposableResource.Status.DeepCopy(),
 
-					expectedReconcileError: "nodes \"worker-0\" not found",
+					extraHandling: func(composableResourceName string) {
+						Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
+					},
+
+					expectedRequestDeleted: true,
 				}),
 				Entry("should fail when trying to add resource because the annotation is not found in targetNode", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -1168,7 +1206,9 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
+						Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 					},
@@ -1195,6 +1235,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 					},
@@ -1221,6 +1262,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -1255,6 +1297,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -1292,6 +1335,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -1337,6 +1381,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -1385,6 +1430,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -1449,6 +1495,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -1513,6 +1560,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -1577,6 +1625,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -1641,6 +1690,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -1705,6 +1755,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -1769,6 +1820,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -1833,6 +1885,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -1897,6 +1950,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -1961,6 +2015,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -2025,6 +2080,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -2093,6 +2149,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -2157,6 +2214,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -2269,6 +2327,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -2368,6 +2427,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -2507,6 +2567,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -2649,6 +2710,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -2802,6 +2864,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -2930,6 +2993,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -3127,6 +3191,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -3296,6 +3361,28 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				expectedReconcileError string
 			}
 
+			BeforeEach(func() {
+				node := &corev1.Node{}
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+				if k8serrors.IsNotFound(err) {
+					Expect(k8sClient.Create(ctx, &corev1.Node{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: worker0Name,
+							Annotations: map[string]string{
+								"machine.openshift.io/machine": "openshift-machine-api/machine-worker-0",
+							},
+						},
+					})).To(Succeed())
+				} else {
+					Expect(err).NotTo(HaveOccurred())
+					if node.Annotations == nil {
+						node.Annotations = map[string]string{}
+					}
+					node.Annotations["machine.openshift.io/machine"] = "openshift-machine-api/machine-worker-0"
+					Expect(k8sClient.Update(ctx, node)).To(Succeed())
+				}
+			})
+
 			DescribeTable("", func(tc testcase) {
 				os.Setenv("FTI_CDI_TENANT_ID", tc.tenant_uuid)
 				os.Setenv("FTI_CDI_CLUSTER_ID", tc.cluster_uuid)
@@ -3357,6 +3444,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 					},
@@ -3395,6 +3483,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -3471,6 +3560,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -3547,6 +3637,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -3623,6 +3714,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -3699,6 +3791,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -3775,6 +3868,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -3867,6 +3961,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -3936,6 +4031,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 				setErrorMode           func()
 				expectedReconcileError string
+				expectedRequestDeleted bool
 			}
 
 			BeforeAll(func() {
@@ -3945,6 +4041,9 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 			DescribeTable("", func(tc testcase) {
 				os.Setenv("FTI_CDI_TENANT_ID", tc.tenant_uuid)
 				os.Setenv("FTI_CDI_CLUSTER_ID", tc.cluster_uuid)
+
+				Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
+				Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
 
 				createComposableResource(tc.resourceName, tc.resourceSpec, tc.resourceStatus, "Detaching")
 
@@ -3956,6 +4055,10 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				if tc.expectedReconcileError != "" {
 					Expect(err).To(HaveOccurred())
 					Expect(err.Error()).To(Equal(tc.expectedReconcileError))
+				} else if tc.expectedRequestDeleted {
+					Expect(err).NotTo(HaveOccurred())
+					Expect(composableResource).NotTo(BeNil())
+					Expect(composableResource.DeletionTimestamp).NotTo(BeNil())
 				} else {
 					Expect(err).NotTo(HaveOccurred())
 					Expect(composableResource.Status).To(Equal(*tc.expectedRequestStatus))
@@ -4015,6 +4118,9 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
+						Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -4060,6 +4166,9 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
+						Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -4105,6 +4214,10 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+
+						Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
+						Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -4196,6 +4309,9 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
+						Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -4295,6 +4411,14 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+						if k8serrors.IsNotFound(err) {
+							Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+						}
+
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -4393,9 +4517,10 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								}
 							},
 						)
+						Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
 					},
 
-					expectedReconcileError: "nodes \"worker-0\" not found",
+					expectedRequestDeleted: true,
 				}),
 				Entry("should fail when removing gpu because the CM returns an error when trying to get machine info", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -4411,6 +4536,14 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+						if k8serrors.IsNotFound(err) {
+							Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+						}
+
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -4456,6 +4589,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -4579,6 +4713,9 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
+						Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: baseComposableResource.Spec.TargetNode}})).To(Succeed())
+
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -4613,18 +4750,25 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, draPod)).NotTo(HaveOccurred())
 
-						nodesToCreate := []*corev1.Node{
-							{
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: baseComposableResource.Spec.TargetNode}, node)
+						if k8serrors.IsNotFound(err) {
+							node = &corev1.Node{
 								ObjectMeta: metav1.ObjectMeta{
 									Name: baseComposableResource.Spec.TargetNode,
 									Annotations: map[string]string{
 										"machine.openshift.io/machine": "openshift-machine-api/machine-worker-0",
 									},
 								},
-							},
-						}
-						for _, node := range nodesToCreate {
+							}
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+							if node.Annotations == nil {
+								node.Annotations = map[string]string{}
+							}
+							node.Annotations["machine.openshift.io/machine"] = "openshift-machine-api/machine-worker-0"
+							Expect(k8sClient.Update(ctx, node)).To(Succeed())
 						}
 
 						machine0 := &machinev1beta1.Metal3Machine{
@@ -4747,6 +4891,16 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
+
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+						if k8serrors.IsNotFound(err) {
+							Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+						}
+
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -4792,6 +4946,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -4915,6 +5070,14 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+						if k8serrors.IsNotFound(err) {
+							Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+						}
+
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -4960,6 +5123,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -5089,6 +5253,25 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+						if k8serrors.IsNotFound(err) {
+							Expect(k8sClient.Create(ctx, &corev1.Node{
+								ObjectMeta: metav1.ObjectMeta{
+									Name: worker0Name,
+									Annotations: map[string]string{
+										"machine.openshift.io/machine": "openshift-machine-api/machine-worker-0",
+									},
+								},
+							})).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+							if node.Annotations == nil {
+								node.Annotations = map[string]string{}
+							}
+							node.Annotations["machine.openshift.io/machine"] = "openshift-machine-api/machine-worker-0"
+							Expect(k8sClient.Update(ctx, node)).To(Succeed())
+						}
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -5123,18 +5306,23 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, draPod)).NotTo(HaveOccurred())
 
-						nodesToCreate := []*corev1.Node{
-							{
+						if k8serrors.IsNotFound(err) {
+							node = &corev1.Node{
 								ObjectMeta: metav1.ObjectMeta{
 									Name: baseComposableResource.Spec.TargetNode,
 									Annotations: map[string]string{
 										"machine.openshift.io/machine": "openshift-machine-api/machine-worker-0",
 									},
 								},
-							},
-						}
-						for _, node := range nodesToCreate {
+							}
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+							if node.Annotations == nil {
+								node.Annotations = map[string]string{}
+							}
+							node.Annotations["machine.openshift.io/machine"] = "openshift-machine-api/machine-worker-0"
+							Expect(k8sClient.Update(ctx, node)).To(Succeed())
 						}
 
 						machine0 := &machinev1beta1.Metal3Machine{
@@ -5264,6 +5452,14 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+						if k8serrors.IsNotFound(err) {
+							Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+						}
+
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -5298,18 +5494,23 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, draPod)).NotTo(HaveOccurred())
 
-						nodesToCreate := []*corev1.Node{
-							{
+						if k8serrors.IsNotFound(err) {
+							node = &corev1.Node{
 								ObjectMeta: metav1.ObjectMeta{
 									Name: baseComposableResource.Spec.TargetNode,
 									Annotations: map[string]string{
 										"machine.openshift.io/machine": "openshift-machine-api/machine-worker-0",
 									},
 								},
-							},
-						}
-						for _, node := range nodesToCreate {
+							}
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+							if node.Annotations == nil {
+								node.Annotations = map[string]string{}
+							}
+							node.Annotations["machine.openshift.io/machine"] = "openshift-machine-api/machine-worker-0"
+							Expect(k8sClient.Update(ctx, node)).To(Succeed())
 						}
 
 						machine0 := &machinev1beta1.Metal3Machine{
@@ -5450,6 +5651,14 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+						if k8serrors.IsNotFound(err) {
+							Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+						}
+
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -5495,6 +5704,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -5734,6 +5944,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 					},
@@ -5760,6 +5971,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 					},
@@ -5803,6 +6015,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 				expectedRequestStatus  *crov1alpha1.ComposableResourceStatus
 				expectedReconcileError string
+				expectedRequestDeleted bool
 			}
 
 			BeforeAll(func() {
@@ -5823,6 +6036,10 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				if tc.expectedReconcileError != "" {
 					Expect(err).To(HaveOccurred())
 					Expect(err.Error()).To(Equal(tc.expectedReconcileError))
+				} else if tc.expectedRequestDeleted {
+					Expect(err).NotTo(HaveOccurred())
+					Expect(composableResource).NotTo(BeNil())
+					Expect(composableResource.DeletionTimestamp).NotTo(BeNil())
 				} else {
 					Expect(err).NotTo(HaveOccurred())
 					Expect(composableResource.Status).To(Equal(*tc.expectedRequestStatus))
@@ -5877,7 +6094,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceSpec:   baseComposableResource.Spec.DeepCopy(),
 					resourceStatus: baseComposableResource.Status.DeepCopy(),
 
-					expectedReconcileError: "nodes \"worker-0\" not found",
+					expectedRequestDeleted: true,
 				}),
 				Entry("should fail when trying to add resource because the annotation is not found in targetNode", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -5896,6 +6113,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 					},
@@ -5922,6 +6140,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 					},
@@ -5948,6 +6167,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -5982,6 +6202,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -6019,6 +6240,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -6064,6 +6286,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -6128,6 +6351,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -6192,6 +6416,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -6256,6 +6481,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -6320,6 +6546,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -6384,6 +6611,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -6448,6 +6676,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -6512,6 +6741,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -6637,6 +6867,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -6813,6 +7044,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -6983,6 +7215,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -7159,6 +7392,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -7353,6 +7587,28 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				expectedReconcileError string
 			}
 
+			BeforeEach(func() {
+				node := &corev1.Node{}
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+				if k8serrors.IsNotFound(err) {
+					Expect(k8sClient.Create(ctx, &corev1.Node{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: worker0Name,
+							Annotations: map[string]string{
+								"machine.openshift.io/machine": "openshift-machine-api/machine-worker-0",
+							},
+						},
+					})).To(Succeed())
+				} else {
+					Expect(err).NotTo(HaveOccurred())
+					if node.Annotations == nil {
+						node.Annotations = map[string]string{}
+					}
+					node.Annotations["machine.openshift.io/machine"] = "openshift-machine-api/machine-worker-0"
+					Expect(k8sClient.Update(ctx, node)).To(Succeed())
+				}
+			})
+
 			DescribeTable("", func(tc testcase) {
 				os.Setenv("FTI_CDI_TENANT_ID", tc.tenant_uuid)
 				os.Setenv("FTI_CDI_CLUSTER_ID", tc.cluster_uuid)
@@ -7414,6 +7670,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 					},
@@ -7452,6 +7709,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -7528,6 +7786,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -7604,6 +7863,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -7680,6 +7940,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -7755,6 +8016,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -7832,6 +8094,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -7908,6 +8171,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -7984,6 +8248,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -8071,10 +8336,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 				setErrorMode           func()
 				expectedReconcileError string
+				expectedRequestDeleted bool
 			}
 
 			BeforeAll(func() {
 				patches = gomonkey.NewPatches()
+			})
+
+			BeforeEach(func() {
+				node := &corev1.Node{}
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+				if k8serrors.IsNotFound(err) {
+					Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+				} else {
+					Expect(err).NotTo(HaveOccurred())
+				}
 			})
 
 			DescribeTable("", func(tc testcase) {
@@ -8091,6 +8367,10 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				if tc.expectedReconcileError != "" {
 					Expect(err).To(HaveOccurred())
 					Expect(err.Error()).To(Equal(tc.expectedReconcileError))
+				} else if tc.expectedRequestDeleted {
+					Expect(err).NotTo(HaveOccurred())
+					Expect(composableResource).NotTo(BeNil())
+					Expect(composableResource.DeletionTimestamp).NotTo(BeNil())
 				} else {
 					Expect(err).NotTo(HaveOccurred())
 					Expect(composableResource.Status).To(Equal(*tc.expectedRequestStatus))
@@ -8149,6 +8429,10 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+
+						Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
+						Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -8194,6 +8478,10 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+
+						Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
+						Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -8239,6 +8527,25 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+						if k8serrors.IsNotFound(err) {
+							Expect(k8sClient.Create(ctx, &corev1.Node{
+								ObjectMeta: metav1.ObjectMeta{
+									Name: worker0Name,
+									Annotations: map[string]string{
+										"machine.openshift.io/machine": "openshift-machine-api/machine-worker-0",
+									},
+								},
+							})).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+							if node.Annotations == nil {
+								node.Annotations = map[string]string{}
+							}
+							node.Annotations["machine.openshift.io/machine"] = "openshift-machine-api/machine-worker-0"
+							Expect(k8sClient.Update(ctx, node)).To(Succeed())
+						}
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -8305,6 +8612,25 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+						if k8serrors.IsNotFound(err) {
+							Expect(k8sClient.Create(ctx, &corev1.Node{
+								ObjectMeta: metav1.ObjectMeta{
+									Name: worker0Name,
+									Annotations: map[string]string{
+										"machine.openshift.io/machine": "openshift-machine-api/machine-worker-0",
+									},
+								},
+							})).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+							if node.Annotations == nil {
+								node.Annotations = map[string]string{}
+							}
+							node.Annotations["machine.openshift.io/machine"] = "openshift-machine-api/machine-worker-0"
+							Expect(k8sClient.Update(ctx, node)).To(Succeed())
+						}
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -8361,9 +8687,10 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								}
 							},
 						)
+						Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
 					},
 
-					expectedReconcileError: "nodes \"worker-0\" not found",
+					expectedRequestDeleted: true,
 				}),
 
 				Entry("should fail when trying to send scaledown request to FM because the FM returns an error message", testcase{
@@ -8380,6 +8707,25 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+						if k8serrors.IsNotFound(err) {
+							Expect(k8sClient.Create(ctx, &corev1.Node{
+								ObjectMeta: metav1.ObjectMeta{
+									Name: worker0Name,
+									Annotations: map[string]string{
+										"machine.openshift.io/machine": "openshift-machine-api/machine-worker-0",
+									},
+								},
+							})).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+							if node.Annotations == nil {
+								node.Annotations = map[string]string{}
+							}
+							node.Annotations["machine.openshift.io/machine"] = "openshift-machine-api/machine-worker-0"
+							Expect(k8sClient.Update(ctx, node)).To(Succeed())
+						}
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -8408,6 +8754,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -8506,6 +8853,14 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+						if k8serrors.IsNotFound(err) {
+							Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+						}
+
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -8523,18 +8878,23 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
 
-						nodesToCreate := []*corev1.Node{
-							{
+						if k8serrors.IsNotFound(err) {
+							node = &corev1.Node{
 								ObjectMeta: metav1.ObjectMeta{
 									Name: baseComposableResource.Spec.TargetNode,
 									Annotations: map[string]string{
 										"machine.openshift.io/machine": "openshift-machine-api/machine-worker-0",
 									},
 								},
-							},
-						}
-						for _, node := range nodesToCreate {
+							}
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+							if node.Annotations == nil {
+								node.Annotations = map[string]string{}
+							}
+							node.Annotations["machine.openshift.io/machine"] = "openshift-machine-api/machine-worker-0"
+							Expect(k8sClient.Update(ctx, node)).To(Succeed())
 						}
 
 						machine0 := &machinev1beta1.Metal3Machine{
@@ -8633,6 +8993,13 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+						if k8serrors.IsNotFound(err) {
+							Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+						}
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -8661,6 +9028,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -8777,6 +9145,13 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+						if k8serrors.IsNotFound(err) {
+							Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+						}
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -8805,6 +9180,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -8948,6 +9324,13 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+						if k8serrors.IsNotFound(err) {
+							Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+						}
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -8976,6 +9359,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -9181,6 +9565,28 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 			patches = gomonkey.NewPatches()
 		})
 
+		BeforeEach(func() {
+			node := &corev1.Node{}
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+			if k8serrors.IsNotFound(err) {
+				Expect(k8sClient.Create(ctx, &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: worker0Name,
+						Annotations: map[string]string{
+							"machine.openshift.io/machine": "openshift-machine-api/machine-worker-0",
+						},
+					},
+				})).To(Succeed())
+			} else {
+				Expect(err).NotTo(HaveOccurred())
+				if node.Annotations == nil {
+					node.Annotations = map[string]string{}
+				}
+				node.Annotations["machine.openshift.io/machine"] = "openshift-machine-api/machine-worker-0"
+				Expect(k8sClient.Update(ctx, node)).To(Succeed())
+			}
+		})
+
 		DescribeTable("", func(tc testcase) {
 			os.Setenv("CDI_PROVIDER_TYPE", tc.cdiProviderType)
 			os.Setenv("FTI_CDI_API_TYPE", tc.ftiCdiApiType)
@@ -9286,7 +9692,20 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						},
 					}
 					for _, node := range nodesToCreate {
-						Expect(k8sClient.Create(ctx, node)).To(Succeed())
+						err := k8sClient.Create(ctx, node)
+						if k8serrors.IsAlreadyExists(err) {
+							existing := &corev1.Node{}
+							Expect(k8sClient.Get(ctx, types.NamespacedName{Name: node.Name}, existing)).To(Succeed())
+							if existing.Annotations == nil {
+								existing.Annotations = map[string]string{}
+							}
+							for k, v := range node.Annotations {
+								existing.Annotations[k] = v
+							}
+							Expect(k8sClient.Update(ctx, existing)).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+						}
 					}
 
 					machine0 := &machinev1beta1.Metal3Machine{
@@ -9450,7 +9869,20 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						},
 					}
 					for _, node := range nodesToCreate {
-						Expect(k8sClient.Create(ctx, node)).To(Succeed())
+						err := k8sClient.Create(ctx, node)
+						if k8serrors.IsAlreadyExists(err) {
+							existing := &corev1.Node{}
+							Expect(k8sClient.Get(ctx, types.NamespacedName{Name: node.Name}, existing)).To(Succeed())
+							if existing.Annotations == nil {
+								existing.Annotations = map[string]string{}
+							}
+							for k, v := range node.Annotations {
+								existing.Annotations[k] = v
+							}
+							Expect(k8sClient.Update(ctx, existing)).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+						}
 					}
 
 					machine0 := &machinev1beta1.Metal3Machine{

@@ -99,6 +99,12 @@ func (r *ComposabilityRequestReconciler) handleComposabilityRequestChange(ctx co
 	var result ctrl.Result
 	var err error
 
+	if gcDone, err := r.performGarbageCollection(ctx, composabilityRequest); err != nil {
+		return r.requeueOnErr(composabilityRequest, err, "failed to perform garbage collection", "composabilityRequest", composabilityRequest.Name)
+	} else if gcDone {
+		return r.doNotRequeue()
+	}
+
 	switch composabilityRequest.Status.State {
 	case "":
 		result, err = r.handleNoneState(ctx, composabilityRequest)
@@ -136,6 +142,28 @@ func (r *ComposabilityRequestReconciler) handleComposabilityRequestChange(ctx co
 	}
 
 	return result, nil
+}
+
+func (r *ComposabilityRequestReconciler) performGarbageCollection(ctx context.Context, composabilityRequest *crov1alpha1.ComposabilityRequest) (bool, error) {
+	if composabilityRequest.Spec.Resource.TargetNode == "" {
+		return false, nil
+	}
+
+	if err := utils.CheckNodeExisted(ctx, r.Client, composabilityRequest.Spec.Resource.TargetNode); err != nil {
+		if k8serrors.IsNotFound(err) {
+			composabilityRequestLog.Info("target node not found, start garbage collecting composabilityRequest", "TargetNode", composabilityRequest.Spec.Resource.TargetNode, "composabilityRequest", composabilityRequest.Name)
+
+			if composabilityRequest.DeletionTimestamp == nil {
+				if err := r.Delete(ctx, composabilityRequest); err != nil && !k8serrors.IsNotFound(err) {
+					return false, err
+				}
+				return true, nil
+			}
+			return false, nil
+		}
+		return false, err
+	}
+	return false, nil
 }
 
 func (r *ComposabilityRequestReconciler) handleComposableResourceChange(ctx context.Context, composableResource *crov1alpha1.ComposableResource) (ctrl.Result, error) {

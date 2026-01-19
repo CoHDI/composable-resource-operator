@@ -245,6 +245,9 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 				cluster_uuid: "cluster0-uuid-temp-0000-000000000000",
 
 				extraHandling: func() {
+					Expect(k8sClient.DeleteAllOf(ctx, &machinev1beta1.Metal3Machine{}, client.InNamespace("openshift-machine-api"))).NotTo(HaveOccurred())
+					Expect(k8sClient.DeleteAllOf(ctx, &metal3v1alpha1.BareMetalHost{}, client.InNamespace("openshift-machine-api"))).NotTo(HaveOccurred())
+					Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
 					nodesToCreate := []*corev1.Node{
 						{
 							ObjectMeta: metav1.ObjectMeta{
@@ -256,6 +259,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 						},
 					}
 					for _, node := range nodesToCreate {
+						Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 						Expect(k8sClient.Create(ctx, node)).To(Succeed())
 					}
 				},

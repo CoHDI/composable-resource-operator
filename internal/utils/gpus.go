@@ -617,6 +617,7 @@ func RunNvidiaSmi(ctx context.Context, c client.Client, clientset *kubernetes.Cl
 			return err
 		}
 	}
+
 	gpusLog.Info("Run nvidia-smi successfully", "target_node_name", targetNodeName)
 	return nil
 }
@@ -679,6 +680,20 @@ func DeleteDeviceTaint(ctx context.Context, c client.Client, resource *crov1alph
 	}
 
 	return nil
+}
+
+func HasDeviceTaint(ctx context.Context, c client.Client, resource *crov1alpha1.ComposableResource) (bool, error) {
+	taintName := fmt.Sprintf("%s-taint", resource.Name)
+
+	taintRule := &v1alpha3.DeviceTaintRule{}
+	err := c.Get(ctx, client.ObjectKey{Name: taintName}, taintRule)
+	if apierrors.IsNotFound(err) {
+		return false, nil
+	} else if err != nil {
+		return false, fmt.Errorf("failed to get DeviceTaintRule %s: %w", taintName, err)
+	}
+
+	return true, nil
 }
 
 func execCommandInPod(ctx context.Context, clientset *kubernetes.Clientset, restConfig *rest.Config, namespace string, podName string, containerName string, command []string) (string, string, error) {

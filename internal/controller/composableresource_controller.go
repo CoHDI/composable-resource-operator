@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"time"
 
@@ -82,6 +83,12 @@ func (r *ComposableResourceReconciler) Reconcile(ctx context.Context, req ctrl.R
 		return r.requeueOnErr(nil, err, "failed to get composableResource", "request", req.NamespacedName)
 	}
 
+	if gcDone, err := r.performGarbageCollection(ctx, composableResource); err != nil {
+		return r.requeueOnErr(composableResource, err, "failed to perform garbage collection", "composableResource", composableResource.Name)
+	} else if gcDone {
+		return r.doNotRequeue()
+	}
+
 	adapter, err := NewComposableResourceAdapter(ctx, r.Client, r.Clientset)
 	if err != nil {
 		return r.requeueOnErr(composableResource, err, "failed to create ComposableResource Adapter", "request", req.NamespacedName)
@@ -119,6 +126,54 @@ func (r *ComposableResourceReconciler) Reconcile(ctx context.Context, req ctrl.R
 	return result, nil
 }
 
+func (r *ComposableResourceReconciler) performGarbageCollection(ctx context.Context, resource *crov1alpha1.ComposableResource) (bool, error) {
+	if resource.Spec.TargetNode == "" {
+		return false, nil
+	}
+
+	if err := utils.CheckNodeExisted(ctx, r.Client, resource.Spec.TargetNode); err != nil {
+		if k8serrors.IsNotFound(err) {
+			composableResourceLog.Info("target node not found, start garbage collecting composableResource", "TargetNode", resource.Spec.TargetNode, "composableResource", resource.Name)
+
+			if hasTaint, err := utils.HasDeviceTaint(ctx, r.Client, resource); err != nil {
+				return false, err
+			} else if hasTaint {
+				if err := utils.DeleteDeviceTaint(ctx, r.Client, resource); err != nil {
+					return false, err
+				}
+			}
+
+			missingNodeError := fmt.Sprintf("target node %s not found", resource.Spec.TargetNode)
+			needRet := false
+
+			if resource.Status.State != "Deleting" {
+				resource.Status.State = "Deleting"
+				resource.Status.Error = missingNodeError
+				if err := r.Status().Update(ctx, resource); err != nil && !k8serrors.IsNotFound(err) {
+					return false, err
+				}
+				needRet = true
+			}
+
+			if resource.DeletionTimestamp == nil {
+				if err := r.Delete(ctx, resource); err != nil && !k8serrors.IsNotFound(err) {
+					return false, err
+				}
+				needRet = true
+			}
+
+			if needRet {
+				return true, nil
+			}
+
+			return false, nil
+		}
+		return false, err
+	}
+
+	return false, nil
+}
+
 func (r *ComposableResourceReconciler) handleNoneState(ctx context.Context, resource *crov1alpha1.ComposableResource) (ctrl.Result, error) {
 	composableResourceLog.Info("start handling None state", "ComposableResource", resource.Name)
 
@@ -137,6 +192,7 @@ func (r *ComposableResourceReconciler) handleNoneState(ctx context.Context, reso
 			resource.Status.CDIDeviceID = CDIDeviceID
 		}
 	}
+
 	resource.Status.State = "Attaching"
 	resource.Status.Error = ""
 	return ctrl.Result{}, r.Status().Update(ctx, resource)
@@ -245,8 +301,10 @@ func (r *ComposableResourceReconciler) handleOnlineState(ctx context.Context, re
 	}
 
 	if deviceID, ok := resource.Labels["cohdi.io/ready-to-detach-device-id"]; ok && deviceID != "" {
-		resource.Status.State = "Detaching"
-		return ctrl.Result{}, r.Status().Update(ctx, resource)
+		if err := r.Delete(ctx, resource); err != nil && !k8serrors.IsNotFound(err) {
+			return r.requeueOnErr(resource, err, "failed to delete ComposableResource with ready-to-detach-device-id label", "ComposableResource", resource.Name)
+		}
+		return r.doNotRequeue()
 	}
 
 	// Check if there are any error messages in CDI system for this ComposableResource.
