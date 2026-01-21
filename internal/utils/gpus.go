@@ -243,13 +243,26 @@ func DrainGPU(ctx context.Context, c client.Client, clientset *kubernetes.Client
 			// Check that /dev/nvidiaX is not open.
 			checkShell := `
 TARGET_FILE="/dev/nvidia` + targetGPUDeviceMinor + `";
-MATCHING_LINK=$(/usr/bin/find -L /proc/[0-9]*/fd -maxdepth 1 -samefile "$TARGET_FILE" -print -quit 2>/dev/null)
-if [ -n "$MATCHING_LINK" ]; then
-  PID=${MATCHING_LINK#/proc/}
-  PID=${PID%%/*}
-  CMD_NAME=$(/usr/bin/cat "/proc/$PID/comm" 2>/dev/null || /usr/bin/echo "[unknown]")
-  /usr/bin/echo "$CMD_NAME"
-  exit 0
+MATCHING_LINKS=$(/usr/bin/find -L /proc/[0-9]*/fd -maxdepth 1 -samefile "$TARGET_FILE" -print 2>/dev/null)
+
+if [ -n "$MATCHING_LINKS" ]; then
+  FIRST=1
+  echo "$MATCHING_LINKS" | while IFS= read -r LINK; do
+    [ -n "$LINK" ] || continue
+
+    PID=${LINK#/proc/}
+    PID=${PID%%/*}
+
+    CMD_NAME=$(/usr/bin/cat "/proc/$PID/comm" 2>/dev/null) || continue
+
+    if [ "$FIRST" = 1 ]; then
+      FIRST=0
+    else
+      /usr/bin/printf ", "
+    fi
+
+    /usr/bin/printf "%s %s" "$PID" "$CMD_NAME"
+  done
 fi
 `
 
@@ -281,7 +294,7 @@ fi
 					return fmt.Errorf("deatch command '%s' failed: '%v', stderr: '%s', stdout: '%s'", step.desc, execErr, stdErr, stdOut)
 				}
 				if step.desc == "check /dev/nvidiaX" && stdOut != "" {
-					return fmt.Errorf("check /dev/nvidiaX command failed: there is a process %s occupied the nvidiaX file", stdOut)
+					return fmt.Errorf("check /dev/nvidiaX command failed: /dev/nvidiaX is in use by one or more processes: %s", stdOut)
 				}
 			}
 
