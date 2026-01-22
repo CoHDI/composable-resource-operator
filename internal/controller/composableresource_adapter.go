@@ -39,20 +39,20 @@ type ComposableResourceAdapter struct {
 func NewComposableResourceAdapter(ctx context.Context, client client.Client, clientSet *kubernetes.Clientset) (*ComposableResourceAdapter, error) {
 	var cdiProvider cdi.CdiProvider
 
-	clusterUUID := os.Getenv("FTI_CDI_CLUSTER_ID")
 	deviceResourceType := os.Getenv("DEVICE_RESOURCE_TYPE")
-
 	if deviceResourceType != "DEVICE_PLUGIN" && deviceResourceType != "DRA" {
 		return nil, fmt.Errorf("the env variable DEVICE_RESOURCE_TYPE has an invalid value: '%s'", deviceResourceType)
-	}
-	if clusterUUID == "" && deviceResourceType == "DEVICE_PLUGIN" {
-		return nil, fmt.Errorf("The cluster in RKE2 does not support DEVICE_PLUGIN, please use DRA")
 	}
 
 	switch cdiProviderType := os.Getenv("CDI_PROVIDER_TYPE"); cdiProviderType {
 	case "SUNFISH":
 		cdiProvider = sunfish.NewSunfishClient()
 	case "FTI_CDI":
+		clusterUUID := os.Getenv("FTI_CDI_CLUSTER_ID")
+		if clusterUUID == "" && deviceResourceType == "DEVICE_PLUGIN" {
+			return nil, fmt.Errorf("The cluster in RKE2 does not support DEVICE_PLUGIN, please use DRA")
+		}
+
 		switch ftiAPIType := os.Getenv("FTI_CDI_API_TYPE"); ftiAPIType {
 		case "CM":
 			cdiProvider = ftiCM.NewFTIClient(ctx, client, clientSet)
