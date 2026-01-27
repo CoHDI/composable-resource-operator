@@ -37,7 +37,10 @@ func RestartDaemonset(ctx context.Context, client client.Client, namespace strin
 	if err := client.Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, daemonset); err != nil {
 		return err
 	}
-
+	if daemonset.Status.DesiredNumberScheduled == 0 {
+		nodesLog.Info("skip restart because daemonSet has 0 desired scheduled pods", "namespace", namespace, "name", name)
+		return nil
+	}
 	if daemonset.Status.NumberReady < daemonset.Status.DesiredNumberScheduled ||
 		daemonset.Status.CurrentNumberScheduled < daemonset.Status.DesiredNumberScheduled ||
 		daemonset.Status.NumberUnavailable > 0 ||

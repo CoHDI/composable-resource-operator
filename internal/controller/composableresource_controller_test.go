@@ -52,6 +52,7 @@ import (
 	crov1alpha1 "github.com/CoHDI/composable-resource-operator/api/v1alpha1"
 	fticmapi "github.com/CoHDI/composable-resource-operator/internal/cdi/fti/cm/api"
 	ftifmapi "github.com/CoHDI/composable-resource-operator/internal/cdi/fti/fm/api"
+	"github.com/CoHDI/composable-resource-operator/internal/utils"
 )
 
 func createComposableResource(
@@ -2967,6 +2968,14 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, draDaemonset)).NotTo(HaveOccurred())
 
+						// Update DaemonSet status
+						Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "nvidia-dra-driver-gpu-kubelet-plugin", Namespace: "nvidia-dra-driver-gpu"}, draDaemonset)).NotTo(HaveOccurred())
+						draDaemonset.Status.DesiredNumberScheduled = 1
+						draDaemonset.Status.NumberReady = 1
+						draDaemonset.Status.CurrentNumberScheduled = 1
+						draDaemonset.Status.NumberUnavailable = 0
+						draDaemonset.Status.NumberMisscheduled = 0
+						Expect(k8sClient.Status().Update(ctx, draDaemonset)).NotTo(HaveOccurred())
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
@@ -5841,6 +5850,20 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, resourceSlice)).NotTo(HaveOccurred())
+
+						// Patch RestartDaemonset to update ResourceSlice (remove GPU)
+						patches.ApplyFunc(
+							utils.RestartDaemonset,
+							func(ctx context.Context, client client.Client, namespace, name string) error {
+								// When DaemonSet is restarted, update ResourceSlice to remove the GPU
+								rs := &resourcev1.ResourceSlice{}
+								if err := k8sClient.Get(ctx, types.NamespacedName{Name: "resourceslice-test"}, rs); err == nil {
+									rs.Spec.Devices = []resourcev1.Device{} // Remove GPU
+									k8sClient.Update(ctx, rs)
+								}
+								return nil
+							},
+						)
 
 						clusterPolicy := &gpuv1.ClusterPolicy{
 							ObjectMeta: metav1.ObjectMeta{
@@ -9505,6 +9528,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=gpu_uuid")) {
+									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("TARGET_FILE")) {

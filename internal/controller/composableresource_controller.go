@@ -31,7 +31,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	"github.com/CoHDI/composable-resource-operator/api/v1alpha1"
 	crov1alpha1 "github.com/CoHDI/composable-resource-operator/api/v1alpha1"
 	"github.com/CoHDI/composable-resource-operator/internal/cdi"
 	"github.com/CoHDI/composable-resource-operator/internal/utils"
@@ -364,33 +363,7 @@ func (r *ComposableResourceReconciler) handleDetachingState(ctx context.Context,
 
 		composableResourceLog.Info("the device has been removed", "ComposableResource", resource.Name)
 
-		if deviceResourceType == "DRA" {
-			if err := utils.DeleteDeviceTaint(ctx, r.Client, resource); err != nil {
-				return r.requeueOnErr(resource, err, "failed to delete DeviceTaintRule", "composableResource", resource.Name)
-			}
-		}
-
-		resource.Status.Error = ""
-		resource.Status.DeviceID = ""
-		resource.Status.CDIDeviceID = ""
-		if err := r.Status().Update(ctx, resource); err != nil {
-			return r.requeueOnErr(resource, err, "failed to update composableResource", "composableResource", resource.Name)
-		}
-	}
-
-	composableResourceList := &v1alpha1.ComposableResourceList{}
-	if err := r.List(ctx, composableResourceList); err != nil {
-		return r.requeueOnErr(resource, err, "failed to list ComposableResource", "ComposableResource", resource.Name)
-	}
-
-	gpuCount := 0
-	for _, composableResource := range composableResourceList.Items {
-		if composableResource.Status.DeviceID != "" {
-			gpuCount++
-		}
-	}
-
-	if gpuCount > 0 {
+		// Restart the device plugin / DRA daemonsets to reflect the change.
 		if deviceResourceType == "DEVICE_PLUGIN" {
 			if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-gpu-operator", "nvidia-device-plugin-daemonset"); err != nil {
 				return r.requeueOnErr(resource, err, "failed to restart nvidia-device-plugin-daemonset", "composableResource", resource.Name)
@@ -402,6 +375,32 @@ func (r *ComposableResourceReconciler) handleDetachingState(ctx context.Context,
 			if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-dra-driver-gpu", "nvidia-dra-driver-gpu-kubelet-plugin"); err != nil {
 				return r.requeueOnErr(resource, err, "failed to restart nvidia-dra-driver-gpu-kubelet-plugin", "composableResource", resource.Name)
 			}
+		}
+
+		time.Sleep(3 * time.Second)
+
+		// Verify that the GPU is no longer visible to the cluster.
+		visible, err := utils.CheckGPUVisible(ctx, r.Client, r.Clientset, r.RestConfig, deviceResourceType, resource)
+		if err != nil {
+			return r.requeueOnErr(resource, err, "failed to check if the gpu has been recognized by cluster", "ComposableResource", resource.Name)
+		}
+		if visible {
+			composableResourceLog.Info("the device is still visible to the cluster", "ComposableResource", resource.Name)
+			return r.requeueAfter(3*time.Second, nil)
+		}
+
+		// Remove the DeviceTaintRule.
+		if deviceResourceType == "DRA" {
+			if err := utils.DeleteDeviceTaint(ctx, r.Client, resource); err != nil {
+				return r.requeueOnErr(resource, err, "failed to delete DeviceTaintRule", "composableResource", resource.Name)
+			}
+		}
+
+		resource.Status.Error = ""
+		resource.Status.DeviceID = ""
+		resource.Status.CDIDeviceID = ""
+		if err := r.Status().Update(ctx, resource); err != nil {
+			return r.requeueOnErr(resource, err, "failed to update composableResource", "composableResource", resource.Name)
 		}
 	}
 
