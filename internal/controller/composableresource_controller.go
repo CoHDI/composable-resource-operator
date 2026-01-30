@@ -377,8 +377,6 @@ func (r *ComposableResourceReconciler) handleDetachingState(ctx context.Context,
 			}
 		}
 
-		time.Sleep(3 * time.Second)
-
 		// Verify that the GPU is no longer visible to the cluster.
 		visible, err := utils.CheckGPUVisible(ctx, r.Client, r.Clientset, r.RestConfig, deviceResourceType, resource)
 		if err != nil {

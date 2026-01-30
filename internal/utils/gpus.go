@@ -100,22 +100,26 @@ func CheckNoGPULoads(ctx context.Context, c client.Client, clientset *kubernetes
 
 	if !driverEnabled {
 
-		// If the nvidia-dra-driver-gpu-kubelet-plugin Pod is not found and the target node does not have a label, it means it has already been drained, so there is no need to check the GPU loads.
-		checkNodeLabels, checkNodeLabelsErr := clientset.CoreV1().Nodes().Get(ctx, targetNodeName, metav1.GetOptions{})
-		if checkNodeLabelsErr == nil {
-			hasPciLabel := checkNodeLabels.Labels["feature.node.kubernetes.io/pci-10de.present"] == "true"
-			hasGpuLabel := checkNodeLabels.Labels["nvidia.com/gpu.present"] == "true"
-			if !hasPciLabel && !hasGpuLabel {
-				gpusLog.Info("GPU labels not present or 'false' on the target node (feature.node.kubernetes.io/pci-10de.present=true and nvidia.com/gpu.present=true not found). Check the GPU loads is not required; skipping.", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
-				return nil
-			}
-		} else {
-			return checkNodeLabelsErr
-		}
-
 		pod, err = getCroNodeAgentPod(ctx, clientset, targetNodeName)
 		if err != nil {
 			return err
+		}
+
+		// Get information from /proc about the GPU to be drained.
+		gpuInfosForProc, err := getGPUInfoFromProcInCroNodeAgentPod(ctx, clientset, restConfig, pod, targetNodeName, "gpu_uuid")
+		if err != nil {
+			return err
+		}
+		foundGPU := false
+		for _, gpuInfo := range gpuInfosForProc {
+			if gpuInfo["gpu_uuid"] == *targetGPUUUID {
+				foundGPU = true
+				break
+			}
+		}
+		if !foundGPU {
+			gpusLog.Info("target GPU UUID was not found in the list of GPUs under /proc. It has already been reset, so there is no load, skip it", "targetNodeName", targetNodeName, "targetGPUUUID", *targetGPUUUID)
+			return nil
 		}
 
 		command = []string{"/bin/chroot", "/host-root", "/usr/bin/nvidia-smi", "--query-compute-apps=gpu_uuid,process_name", "--format=csv,noheader,nounits"}
@@ -194,19 +198,6 @@ func DrainGPU(ctx context.Context, c client.Client, clientset *kubernetes.Client
 		if !driverEnabled {
 			// RKE2 + DRA
 
-			// If the nvidia-dra-driver-gpu-kubelet-plugin Pod is not found and the target node does not have a label, it means it has already been drained, so there is no need to drain it.
-			checkNodeLabels, checkNodeLabelsErr := clientset.CoreV1().Nodes().Get(ctx, targetNodeName, metav1.GetOptions{})
-			if checkNodeLabelsErr == nil {
-				hasPciLabel := checkNodeLabels.Labels["feature.node.kubernetes.io/pci-10de.present"] == "true"
-				hasGpuLabel := checkNodeLabels.Labels["nvidia.com/gpu.present"] == "true"
-				if !hasPciLabel && !hasGpuLabel {
-					gpusLog.Info("GPU labels not present or 'false' on the target node (feature.node.kubernetes.io/pci-10de.present=true and nvidia.com/gpu.present=true not found). Draining is not required; skipping.", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
-					return nil
-				}
-			} else {
-				return checkNodeLabelsErr
-			}
-
 			// Get cro-node-agent Pod.
 			draPod, err := getCroNodeAgentPod(ctx, clientset, targetNodeName)
 			if err != nil {
@@ -218,16 +209,18 @@ func DrainGPU(ctx context.Context, c client.Client, clientset *kubernetes.Client
 			if err != nil {
 				return err
 			}
+			foundGPU := false
 			targetGPUDeviceMinor := ""
 			targetGPUBusID := ""
 			for _, gpuInfo := range gpuInfosForProc {
 				if gpuInfo["gpu_uuid"] == targetGPUUUID {
 					targetGPUDeviceMinor = gpuInfo["device_minor"]
 					targetGPUBusID = strings.ToUpper(strings.TrimSpace(gpuInfo["pci.bus_id"]))
+					foundGPU = true
 					break
 				}
 			}
-			if targetGPUBusID == "" {
+			if !foundGPU {
 				gpusLog.Info("target GPU UUID was not found in the list of GPUs under /proc. It has already been reset, so no need to drain, skip it", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
 				return nil
 			}
