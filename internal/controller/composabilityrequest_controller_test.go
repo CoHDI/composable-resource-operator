@@ -720,9 +720,12 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 			expectedUsedComposableResources    []string
 			expectedUsedNodes                  []string
 			expectedReconcileError             error
+			expectedRequestDeleted             bool
 		}
 
 		BeforeAll(func() {
+			Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
+
 			nodes := []*corev1.Node{
 				{
 					ObjectMeta: metav1.ObjectMeta{Name: worker0Name},
@@ -837,6 +840,20 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 			if tc.expectedReconcileError != nil {
 				Expect(err).To(HaveOccurred())
 				Expect(err).To(MatchError(tc.expectedReconcileError))
+				DeferCleanup(func() {
+					cleanAllComposabilityRequests()
+					cleanAllComposableResources()
+				})
+				return
+			} else if tc.expectedRequestDeleted {
+				Expect(err).NotTo(HaveOccurred())
+				Expect(composabilityRequest).NotTo(BeNil())
+				Expect(composabilityRequest.DeletionTimestamp).NotTo(BeNil())
+				DeferCleanup(func() {
+					cleanAllComposabilityRequests()
+					cleanAllComposableResources()
+				})
+				return
 			} else {
 				Expect(err).NotTo(HaveOccurred())
 				Expect(composabilityRequest.Status.State).To(Equal("Updating"))
@@ -954,7 +971,7 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 					return composabilityRequestSpec
 				}(),
 
-				expectedReconcileError: errors.New("the target node does not existed"),
+				expectedRequestDeleted: true,
 			}),
 			Entry("should succeed with differentnode, with no        TargerNode, with no            OtherSpec", testcase{
 				requestName: "test-composability-request",
@@ -1390,6 +1407,11 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 			expectedResourceItems  []crov1alpha1.ComposableResource
 			expectedReconcileError error
 		}
+
+		BeforeEach(func() {
+			Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
+			Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+		})
 
 		DescribeTable("", func(tc testcase) {
 			createComposabilityRequest(tc.requestName, tc.requestSpec, tc.requestStatus, "Updating")

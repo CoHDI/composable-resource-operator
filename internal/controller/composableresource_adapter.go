@@ -48,6 +48,11 @@ func NewComposableResourceAdapter(ctx context.Context, client client.Client, cli
 	case "SUNFISH":
 		cdiProvider = sunfish.NewSunfishClient()
 	case "FTI_CDI":
+		clusterUUID := os.Getenv("FTI_CDI_CLUSTER_ID")
+		if clusterUUID == "" && deviceResourceType == "DEVICE_PLUGIN" {
+			return nil, fmt.Errorf("The cluster in RKE2 does not support DEVICE_PLUGIN, please use DRA")
+		}
+
 		switch ftiAPIType := os.Getenv("FTI_CDI_API_TYPE"); ftiAPIType {
 		case "CM":
 			cdiProvider = ftiCM.NewFTIClient(ctx, client, clientSet)

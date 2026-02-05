@@ -107,6 +107,14 @@ rules:
   verbs:
   - get
 - apiGroups:
+  - nvidia.com
+  resources:
+  - clusterpolicies
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
   - resource.k8s.io
   resources:
   - resourceslices
@@ -124,3 +132,4 @@ rules:
   - get
   - patch
   - update
+  

@@ -288,12 +288,12 @@ func (f *FTIClient) CheckResource(instance *v1alpha1.ComposableResource) error {
 
 			for _, device := range resourceSpec.Devices {
 				if device.DeviceUUID == instance.Status.DeviceID {
-					if device.Detail.ResourceOPStatus == "0" {
+					if device.Detail.ResourceOPStatus[:1] == "0" {
 						// The target device exists and has no error, return OK.
 						return nil
-					} else if device.Detail.ResourceOPStatus == "1" {
+					} else if device.Detail.ResourceOPStatus[:1] == "1" {
 						return fmt.Errorf("the target gpu '%s' is showing a Warning status in CM", instance.Status.DeviceID)
-					} else if device.Detail.ResourceOPStatus == "2" {
+					} else if device.Detail.ResourceOPStatus[:1] == "2" {
 						return fmt.Errorf("the target gpu '%s' is showing a Critical status in CM", instance.Status.DeviceID)
 					} else {
 						return fmt.Errorf("the target gpu '%s' has unknown status '%s' in CM", instance.Status.DeviceID, device.Detail.ResourceOPStatus)
@@ -343,7 +343,7 @@ func (f *FTIClient) GetResources() (deviceInfoList []cdi.DeviceInfo, err error) 
 					MachineUUID: machineID,
 					DeviceType:  resourceSpec.Type,
 					DeviceID:    device.DeviceUUID,
-					CDIDeviceID: device.DeviceUUID,
+					CDIDeviceID: device.Detail.ResourceUUID,
 				})
 			}
 		}

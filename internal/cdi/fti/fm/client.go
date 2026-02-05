@@ -44,7 +44,7 @@ import (
 
 var (
 	clientLog        = ctrl.Log.WithName("fti_fm_client")
-	fmRequestTimeout = 60 * time.Second
+	fmRequestTimeout = 180 * time.Second
 )
 
 type FTIClient struct {
@@ -55,6 +55,20 @@ type FTIClient struct {
 	client                     client.Client
 	clientSet                  *kubernetes.Clientset
 	token                      *fti.CachedToken
+}
+
+func formatFMErrorDetail(detail ftifmapi.ErrorDetail) string {
+	message := ""
+	if len(detail.Message) > 0 {
+		var msgString string
+		if err := json.Unmarshal(detail.Message, &msgString); err == nil {
+			message = msgString
+		} else {
+			message = strings.TrimSpace(string(detail.Message))
+		}
+	}
+
+	return fmt.Sprintf("code: '%s', error message: '%s'", detail.Code, message)
 }
 
 func newHttpClient(ctx context.Context, token *oauth2.Token) *http.Client {
@@ -118,6 +132,7 @@ func (f *FTIClient) AddResource(instance *v1alpha1.ComposableResource) (deviceID
 											},
 										},
 									},
+									Num: 1,
 								},
 							},
 						},
@@ -161,7 +176,7 @@ func (f *FTIClient) AddResource(instance *v1alpha1.ComposableResource) (deviceID
 			return "", "", fmt.Errorf("failed to unmarshal FM scaleup error response body into errBody. Original error: %w", err)
 		}
 
-		err = fmt.Errorf("failed to process FM scaleup request. FM returned code: '%s', error message: '%s'", errBody.Code, errBody.Message)
+		err = fmt.Errorf("failed to process FM scaleup request. FM returned %s", formatFMErrorDetail(errBody.Detail))
 		clientLog.Error(err, "failed to process FM scaleup request", "ComposableResource", instance.Name)
 		return "", "", err
 	}
@@ -177,12 +192,12 @@ func (f *FTIClient) AddResource(instance *v1alpha1.ComposableResource) (deviceID
 
 		for _, spec := range resource.Spec.Condition {
 			if spec.Column == "model" && spec.Operator == "eq" && spec.Value == instance.Spec.Model {
-				if resource.OptionStatus == "0" {
+				if resource.OptionStatus[:1] == "0" {
 					return resource.SerialNum, resource.ResourceUUID, nil
-				} else if resource.OptionStatus == "1" {
+				} else if resource.OptionStatus[:1] == "1" {
 					clientLog.Info("the FM attached device called is in Warning state in FM", "ComposableResource", instance.Name)
 					return resource.SerialNum, resource.ResourceUUID, nil
-				} else if resource.OptionStatus == "2" {
+				} else if resource.OptionStatus[:1] == "2" {
 					err := fmt.Errorf("the FM attached device called by %s is in Critical state in FM", instance.Name)
 					clientLog.Error(err, "failed to attach device", "ComposableResource", instance.Name)
 					return "", "", err
@@ -207,6 +222,25 @@ func (f *FTIClient) RemoveResource(instance *v1alpha1.ComposableResource) error 
 		return err
 	}
 
+	machineData, err := f.getMachineInfo(machineID)
+	if err != nil {
+		clientLog.Error(err, "failed to get MachineInfo from FM for resource existence check", "ComposableResource", instance.Name)
+		return err
+	}
+
+	resourceExists := false
+	for _, resource := range machineData.Machines[0].Resources {
+		if resource.Type == instance.Spec.Type && resource.ResourceUUID == instance.Status.CDIDeviceID {
+			resourceExists = true
+			break
+		}
+	}
+
+	if !resourceExists {
+		clientLog.Info("resource does not exist in FM, skipping removal", "ComposableResource", instance.Name, "CDIDeviceID", instance.Status.CDIDeviceID)
+		return nil
+	}
+
 	token, err := f.token.GetToken()
 	if err != nil {
 		clientLog.Error(err, "failed to get authentication token for FM scaledown", "ComposableResource", instance.Name)
@@ -224,7 +258,8 @@ func (f *FTIClient) RemoveResource(instance *v1alpha1.ComposableResource) error 
 							ResourceSpecs: []ftifmapi.ScaleDownResourceSpecItem{
 								{
 									Type:         instance.Spec.Type,
-									ResourceUUID: instance.Status.DeviceID,
+									ResourceUUID: instance.Status.CDIDeviceID,
+									Num:          1,
 								},
 							},
 						},
@@ -268,7 +303,7 @@ func (f *FTIClient) RemoveResource(instance *v1alpha1.ComposableResource) error 
 			return fmt.Errorf("failed to unmarshal scaledown error response body into errBody. Original error: %w", err)
 		}
 
-		err = fmt.Errorf("failed to process scaledown request. FM returned code: %s, error message: %s", errBody.Code, errBody.Message)
+		err = fmt.Errorf("failed to process FM scaledown request. FM returned %s", formatFMErrorDetail(errBody.Detail))
 		clientLog.Error(err, "failed to process scaledown request", "ComposableResource", instance.Name)
 		return err
 	}
@@ -304,12 +339,12 @@ func (f *FTIClient) CheckResource(instance *v1alpha1.ComposableResource) error {
 			}
 
 			if resource.SerialNum == instance.Status.DeviceID {
-				if resource.OptionStatus == "0" {
+				if resource.OptionStatus[:1] == "0" {
 					// The target device exists and has no error, return OK.
 					return nil
-				} else if resource.OptionStatus == "1" {
+				} else if resource.OptionStatus[:1] == "1" {
 					return fmt.Errorf("the target gpu '%s' is showing a Warning status in FM", instance.Status.DeviceID)
-				} else if resource.OptionStatus == "2" {
+				} else if resource.OptionStatus[:1] == "2" {
 					return fmt.Errorf("the target gpu '%s' is showing a Critical status in FM", instance.Status.DeviceID)
 				} else {
 					return fmt.Errorf("the target gpu '%s' has unknown status '%s' in FM", instance.Status.DeviceID, resource.OptionStatus)
@@ -355,11 +390,21 @@ func (f *FTIClient) GetResources() (deviceInfoList []cdi.DeviceInfo, err error) 
 				continue
 			}
 
+			model := ""
+			// Extract model from resource.Spec.Condition
+			for _, condition := range resource.Spec.Condition {
+				if condition.Column == "model" && condition.Operator == "eq" {
+					model = condition.Value
+					break
+				}
+			}
+
 			deviceInfoList = append(deviceInfoList, cdi.DeviceInfo{
 				NodeName:    node.Name,
 				MachineUUID: machineID,
 				DeviceType:  resource.Type,
-				DeviceID:    resource.ResourceUUID,
+				Model:       model,
+				DeviceID:    resource.SerialNum,
 				CDIDeviceID: resource.ResourceUUID,
 			})
 		}
@@ -453,7 +498,7 @@ func (f *FTIClient) getMachineInfo(machineID string) (*ftifmapi.GetMachineData, 
 			return nil, fmt.Errorf("failed to unmarshal FM get error response body into errBody. Original error: %w", err)
 		}
 
-		err = fmt.Errorf("failed to process FM get request. FM return code: '%s', error message: '%s'", errBody.Code, errBody.Message)
+		err = fmt.Errorf("failed to process FM get request. FM returned %s", formatFMErrorDetail(errBody.Detail))
 		return nil, err
 	}
 

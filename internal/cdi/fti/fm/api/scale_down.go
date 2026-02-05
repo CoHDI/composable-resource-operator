@@ -37,4 +37,5 @@ type ScaleDownResourceItem struct {
 type ScaleDownResourceSpecItem struct {
 	Type         string `json:"res_type"`
 	ResourceUUID string `json:"res_uuid"`
+	Num          int    `json:"res_num"`
 }

@@ -30,6 +30,7 @@ import (
 	"strings"
 	"time"
 
+	gpuv1 "github.com/NVIDIA/gpu-operator/api/v1"
 	"github.com/agiledragon/gomonkey/v2"
 	metal3v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	machinev1beta1 "github.com/metal3-io/cluster-api-provider-metal3/api/v1beta1"
@@ -38,6 +39,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
@@ -50,6 +52,7 @@ import (
 	crov1alpha1 "github.com/CoHDI/composable-resource-operator/api/v1alpha1"
 	fticmapi "github.com/CoHDI/composable-resource-operator/internal/cdi/fti/cm/api"
 	ftifmapi "github.com/CoHDI/composable-resource-operator/internal/cdi/fti/fm/api"
+	"github.com/CoHDI/composable-resource-operator/internal/utils"
 )
 
 func createComposableResource(
@@ -582,18 +585,6 @@ func generateFMUpdateData(state string) []byte {
 	return jsonData
 }
 
-func generateFMError() []byte {
-	data := ftifmapi.ErrorBody{
-		Code:    "E02XXXX",
-		Message: "fm internal error",
-	}
-
-	jsonData, err := json.Marshal(data)
-	Expect(err).NotTo(HaveOccurred())
-
-	return jsonData
-}
-
 var baseComposableResource = crov1alpha1.ComposableResource{
 	Spec: crov1alpha1.ComposableResourceSpec{
 		Type:        "gpu",
@@ -833,7 +824,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 			case "/fabric_manager/api/v1/machines/machine0-uuid-temp-fail-000000000000/update":
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusNotFound)
-				w.Write([]byte(`{"code":"E02XXXX","message":"scaleup method not found"}`))
+				w.Write([]byte(`{"status":404,"detail":{"code":"E02XXXX","message":"scaleup method not found"}}`))
 
 			case "/fabric_manager/api/v1/machines/machine0-uuid-temp-fail-000000000001/update":
 				w.Header().Set("Content-Type", "text/html")
@@ -865,10 +856,20 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				w.WriteHeader(http.StatusOK)
 				w.Write(generateFMUpdateData(""))
 
+			case "/fabric_manager/api/v1/machines/machine0-uuid-temp-fail-000000000007/update":
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusNotFound)
+				w.Write([]byte(`{"status":404,"detail":{"code":"E02XXXX","message":"scaledown method not found"}}`))
+
+			case "/fabric_manager/api/v1/machines/machine0-uuid-temp-fail-000000000008/update":
+				w.Header().Set("Content-Type", "text/html")
+				w.WriteHeader(http.StatusNotFound)
+				w.Write([]byte("<html><body>This is not JSON!</body></html>"))
+
 			case "/fabric_manager/api/v1/machines/machine0-uuid-temp-fail-000000000000":
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusNotFound)
-				w.Write([]byte(`{"code":"E02XXXX","message":"machine not found"}`))
+				w.Write([]byte(`{"status":404,"detail":{"code":"E02XXXX","message":"machine not found"}}`))
 
 			case "/fabric_manager/api/v1/machines/machine0-uuid-temp-fail-000000000001":
 				w.Header().Set("Content-Type", "text/html")
@@ -899,6 +900,16 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusOK)
 				w.Write(generateFMMachineData("isUnknown"))
+
+			case "/fabric_manager/api/v1/machines/machine0-uuid-temp-fail-000000000007":
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				w.Write(generateFMMachineData("isNormal"))
+
+			case "/fabric_manager/api/v1/machines/machine0-uuid-temp-fail-000000000008":
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusOK)
+				w.Write(generateFMMachineData("isNormal"))
 
 			case "/fabric_manager/api/v1/machines/machine0-uuid-temp-0000-000000000000":
 				w.Header().Set("Content-Type", "application/json")
@@ -999,6 +1010,10 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				os.Setenv("FTI_CDI_TENANT_ID", "tenant00-uuid-temp-0000-000000000000")
 				os.Setenv("FTI_CDI_CLUSTER_ID", "cluster0-uuid-temp-0000-000000000000")
 
+				Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
+
+				Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: baseComposableResource.Spec.TargetNode}})).To(Succeed())
+
 				createComposableResource(tc.resourceName, tc.resourceSpec, nil, "")
 
 				Expect(callFunction(tc.setErrorMode)).NotTo(HaveOccurred())
@@ -1027,6 +1042,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				Entry("should successfully enter Attaching state", testcase{
 					resourceName: "test-composable-resource",
 					resourceSpec: baseComposableResource.Spec.DeepCopy(),
+
+					setErrorMode: func() {},
 
 					expectedRequestFinalizer: []string{composabilityRequestFinalizer},
 					expectedRequestStatus: func() *crov1alpha1.ComposableResourceStatus {
@@ -1066,10 +1083,33 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 				expectedRequestStatus  *crov1alpha1.ComposableResourceStatus
 				expectedReconcileError string
+				expectedRequestDeleted bool
 			}
 
 			BeforeAll(func() {
 				patches = gomonkey.NewPatches()
+			})
+
+			BeforeEach(func() {
+				node := &corev1.Node{}
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+				if k8serrors.IsNotFound(err) {
+					Expect(k8sClient.Create(ctx, &corev1.Node{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: worker0Name,
+							Annotations: map[string]string{
+								"machine.openshift.io/machine": "openshift-machine-api/machine-worker-0",
+							},
+						},
+					})).To(Succeed())
+				} else {
+					Expect(err).NotTo(HaveOccurred())
+					if node.Annotations == nil {
+						node.Annotations = map[string]string{}
+					}
+					node.Annotations["machine.openshift.io/machine"] = "openshift-machine-api/machine-worker-0"
+					Expect(k8sClient.Update(ctx, node)).To(Succeed())
+				}
 			})
 
 			DescribeTable("", func(tc testcase) {
@@ -1086,6 +1126,10 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				if tc.expectedReconcileError != "" {
 					Expect(err).To(HaveOccurred())
 					Expect(err.Error()).To(Equal(tc.expectedReconcileError))
+				} else if tc.expectedRequestDeleted {
+					Expect(err).NotTo(HaveOccurred())
+					Expect(composableResource).NotTo(BeNil())
+					Expect(composableResource.DeletionTimestamp).NotTo(BeNil())
 				} else {
 					Expect(err).NotTo(HaveOccurred())
 					Expect(composableResource.Status).To(Equal(*tc.expectedRequestStatus))
@@ -1128,6 +1172,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 					cleanAllComposableResources()
 
+					Expect(k8sClient.DeleteAllOf(ctx, &gpuv1.ClusterPolicy{})).NotTo(HaveOccurred())
+
 					patches.Reset()
 				})
 			},
@@ -1139,7 +1185,11 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceSpec:   baseComposableResource.Spec.DeepCopy(),
 					resourceStatus: baseComposableResource.Status.DeepCopy(),
 
-					expectedReconcileError: "nodes \"worker-0\" not found",
+					extraHandling: func(composableResourceName string) {
+						Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
+					},
+
+					expectedRequestDeleted: true,
 				}),
 				Entry("should fail when trying to add resource because the annotation is not found in targetNode", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -1157,7 +1207,9 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
+						Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 					},
@@ -1184,6 +1236,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 					},
@@ -1210,6 +1263,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -1244,6 +1298,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -1281,6 +1336,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -1326,6 +1382,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -1374,6 +1431,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -1438,6 +1496,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -1502,6 +1561,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -1566,6 +1626,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -1630,6 +1691,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -1694,6 +1756,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -1758,6 +1821,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -1822,6 +1886,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -1886,6 +1951,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -1950,6 +2016,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -2014,6 +2081,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -2082,6 +2150,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -2146,6 +2215,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -2212,6 +2282,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, draDaemonset)).NotTo(HaveOccurred())
+
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
 					},
 
 					expectedRequestStatus: func() *crov1alpha1.ComposableResourceStatus {
@@ -2243,6 +2328,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -2300,6 +2386,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
@@ -2342,6 +2443,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -2426,6 +2528,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, draDaemonset)).NotTo(HaveOccurred())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
@@ -2466,6 +2583,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -2553,6 +2671,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, draDaemonset)).NotTo(HaveOccurred())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
@@ -2593,6 +2726,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -2691,6 +2825,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						draDaemonsetToCreate.Status = *draDaemonset.Status.DeepCopy()
 						Expect(k8sClient.Status().Update(ctx, draDaemonsetToCreate)).To(Succeed())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
@@ -2731,6 +2880,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -2818,6 +2968,14 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, draDaemonset)).NotTo(HaveOccurred())
 
+						// Update DaemonSet status
+						Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "nvidia-dra-driver-gpu-kubelet-plugin", Namespace: "nvidia-dra-driver-gpu"}, draDaemonset)).NotTo(HaveOccurred())
+						draDaemonset.Status.DesiredNumberScheduled = 1
+						draDaemonset.Status.NumberReady = 1
+						draDaemonset.Status.CurrentNumberScheduled = 1
+						draDaemonset.Status.NumberUnavailable = 0
+						draDaemonset.Status.NumberMisscheduled = 0
+						Expect(k8sClient.Status().Update(ctx, draDaemonset)).NotTo(HaveOccurred())
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
@@ -2859,6 +3017,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -3056,6 +3215,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -3225,6 +3385,28 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				expectedReconcileError string
 			}
 
+			BeforeEach(func() {
+				node := &corev1.Node{}
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+				if k8serrors.IsNotFound(err) {
+					Expect(k8sClient.Create(ctx, &corev1.Node{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: worker0Name,
+							Annotations: map[string]string{
+								"machine.openshift.io/machine": "openshift-machine-api/machine-worker-0",
+							},
+						},
+					})).To(Succeed())
+				} else {
+					Expect(err).NotTo(HaveOccurred())
+					if node.Annotations == nil {
+						node.Annotations = map[string]string{}
+					}
+					node.Annotations["machine.openshift.io/machine"] = "openshift-machine-api/machine-worker-0"
+					Expect(k8sClient.Update(ctx, node)).To(Succeed())
+				}
+			})
+
 			DescribeTable("", func(tc testcase) {
 				os.Setenv("FTI_CDI_TENANT_ID", tc.tenant_uuid)
 				os.Setenv("FTI_CDI_CLUSTER_ID", tc.cluster_uuid)
@@ -3270,7 +3452,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -3286,6 +3468,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 					},
@@ -3295,7 +3478,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.Error = "metal3machines.infrastructure.cluster.x-k8s.io \"machine-worker-0\" not found"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -3308,7 +3491,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -3324,6 +3507,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -3371,7 +3555,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.Error = "failed to process CM get request. http returned status: '404', cm return code: 'E02XXXX', error message: 'machine not found'"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -3384,7 +3568,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -3400,6 +3584,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -3447,7 +3632,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.Error = "the target device 'GPU-device00-uuid-temp-0000-000000000000' cannot be found in CDI system"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -3460,7 +3645,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -3476,6 +3661,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -3523,7 +3709,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.Error = "the target gpu 'GPU-device00-uuid-temp-0000-000000000000' is showing a Warning status in CM"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -3536,7 +3722,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -3552,6 +3738,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -3599,7 +3786,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.Error = "the target gpu 'GPU-device00-uuid-temp-0000-000000000000' is showing a Critical status in CM"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -3612,7 +3799,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -3628,6 +3815,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -3675,7 +3863,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.Error = "the target gpu 'GPU-device00-uuid-temp-0000-000000000000' has unknown status '3' in CM"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -3688,7 +3876,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -3704,6 +3892,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -3750,7 +3939,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -3779,7 +3968,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						composableResourceStatus.Error = "some error message"
 						return composableResourceStatus
 					}(),
@@ -3796,6 +3985,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -3842,7 +4032,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -3865,6 +4055,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 				setErrorMode           func()
 				expectedReconcileError string
+				expectedRequestDeleted bool
 			}
 
 			BeforeAll(func() {
@@ -3874,6 +4065,9 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 			DescribeTable("", func(tc testcase) {
 				os.Setenv("FTI_CDI_TENANT_ID", tc.tenant_uuid)
 				os.Setenv("FTI_CDI_CLUSTER_ID", tc.cluster_uuid)
+
+				Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
+				Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
 
 				createComposableResource(tc.resourceName, tc.resourceSpec, tc.resourceStatus, "Detaching")
 
@@ -3885,6 +4079,10 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				if tc.expectedReconcileError != "" {
 					Expect(err).To(HaveOccurred())
 					Expect(err.Error()).To(Equal(tc.expectedReconcileError))
+				} else if tc.expectedRequestDeleted {
+					Expect(err).NotTo(HaveOccurred())
+					Expect(composableResource).NotTo(BeNil())
+					Expect(composableResource.DeletionTimestamp).NotTo(BeNil())
 				} else {
 					Expect(err).NotTo(HaveOccurred())
 					Expect(composableResource.Status).To(Equal(*tc.expectedRequestStatus))
@@ -3925,24 +4123,11 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 					cleanAllComposableResources()
 
+					Expect(k8sClient.DeleteAllOf(ctx, &gpuv1.ClusterPolicy{})).NotTo(HaveOccurred())
+
 					patches.Reset()
 				})
 			},
-				Entry("should fail when checking gpu loads because nvidia-driver-daemonset pod can not be found", testcase{
-					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
-					cluster_uuid: "cluster0-uuid-temp-0000-000000000000",
-
-					resourceName: "test-composable-resource",
-					resourceSpec: baseComposableResource.Spec.DeepCopy(),
-					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
-						composableResourceStatus := baseComposableResource.Status.DeepCopy()
-						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						return composableResourceStatus
-					}(),
-
-					expectedReconcileError: "no Pod with label 'app.kubernetes.io/component=nvidia-driver' found on node worker-0",
-				}),
 				Entry("should fail when checking gpu loads because nvidia-smi command failed", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
 					cluster_uuid: "cluster0-uuid-temp-0000-000000000000",
@@ -3952,11 +4137,14 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
+						Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -3973,6 +4161,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
@@ -3986,7 +4189,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						)
 					},
 
-					expectedReconcileError: "run nvidia-smi in pod 'nvidia-driver-daemonset-test' to check gpu loads failed: '<nil>', stderr: 'nvidia-smi: command not found'",
+					expectedReconcileError: "run nvidia-smi in pod 'nvidia-driver-daemonset-test' to check gpu loads failed: '<nil>', stderr: 'nvidia-smi: command not found', stdout: ''",
 				}),
 				Entry("should fail when checking gpu loads because there are gpu loads existed", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -3997,11 +4200,14 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
+						Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -4019,6 +4225,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
@@ -4031,7 +4252,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						)
 					},
 
-					expectedReconcileError: "found gpu load on gpu 'GPU-device00-uuid-temp-0000-000000000000': [GPUUUID: 'GPU-device00-uuid-temp-0000-000000000000', ProcessName: 'gpu_load_progress']",
+					expectedReconcileError: "found gpu loads on node 'worker-0': '[GPUUUID: 'GPU-device00-uuid-temp-0000-000000000000', ProcessName: 'gpu_load_progress']'",
 				}),
 				Entry("should fail when draining gpu because the nvidiaX file is being occupied", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -4042,11 +4263,15 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+
+						Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
+						Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -4089,12 +4314,27 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, resourceSlice)).NotTo(HaveOccurred())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -4118,11 +4358,14 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
+						Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -4165,12 +4408,27 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, resourceSlice)).NotTo(HaveOccurred())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -4202,11 +4460,19 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+						if k8serrors.IsNotFound(err) {
+							Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+						}
+
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -4266,12 +4532,27 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, resourceSlice)).NotTo(HaveOccurred())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -4290,9 +4571,10 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								}
 							},
 						)
+						Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
 					},
 
-					expectedReconcileError: "nodes \"worker-0\" not found",
+					expectedRequestDeleted: true,
 				}),
 				Entry("should fail when removing gpu because the CM returns an error when trying to get machine info", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -4303,11 +4585,19 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+						if k8serrors.IsNotFound(err) {
+							Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+						}
+
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -4353,6 +4643,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -4419,12 +4710,27 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, resourceSlice)).NotTo(HaveOccurred())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -4456,11 +4762,14 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
+						Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: baseComposableResource.Spec.TargetNode}})).To(Succeed())
+
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -4495,18 +4804,25 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, draPod)).NotTo(HaveOccurred())
 
-						nodesToCreate := []*corev1.Node{
-							{
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: baseComposableResource.Spec.TargetNode}, node)
+						if k8serrors.IsNotFound(err) {
+							node = &corev1.Node{
 								ObjectMeta: metav1.ObjectMeta{
 									Name: baseComposableResource.Spec.TargetNode,
 									Annotations: map[string]string{
 										"machine.openshift.io/machine": "openshift-machine-api/machine-worker-0",
 									},
 								},
-							},
-						}
-						for _, node := range nodesToCreate {
+							}
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+							if node.Annotations == nil {
+								node.Annotations = map[string]string{}
+							}
+							node.Annotations["machine.openshift.io/machine"] = "openshift-machine-api/machine-worker-0"
+							Expect(k8sClient.Update(ctx, node)).To(Succeed())
 						}
 
 						machine0 := &machinev1beta1.Metal3Machine{
@@ -4572,12 +4888,27 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, resourceSlice)).NotTo(HaveOccurred())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -4609,11 +4940,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
+
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+						if k8serrors.IsNotFound(err) {
+							Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+						}
+
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -4659,6 +5000,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -4725,12 +5067,27 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, resourceSlice)).NotTo(HaveOccurred())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -4762,11 +5119,19 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+						if k8serrors.IsNotFound(err) {
+							Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+						}
+
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -4812,6 +5177,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -4878,12 +5244,27 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, resourceSlice)).NotTo(HaveOccurred())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -4908,7 +5289,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.State = "Detaching"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -4921,11 +5302,30 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-fail-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-fail-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-fail-000000000res"
 						return composableResourceStatus
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+						if k8serrors.IsNotFound(err) {
+							Expect(k8sClient.Create(ctx, &corev1.Node{
+								ObjectMeta: metav1.ObjectMeta{
+									Name: worker0Name,
+									Annotations: map[string]string{
+										"machine.openshift.io/machine": "openshift-machine-api/machine-worker-0",
+									},
+								},
+							})).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+							if node.Annotations == nil {
+								node.Annotations = map[string]string{}
+							}
+							node.Annotations["machine.openshift.io/machine"] = "openshift-machine-api/machine-worker-0"
+							Expect(k8sClient.Update(ctx, node)).To(Succeed())
+						}
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -4960,18 +5360,23 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, draPod)).NotTo(HaveOccurred())
 
-						nodesToCreate := []*corev1.Node{
-							{
+						if k8serrors.IsNotFound(err) {
+							node = &corev1.Node{
 								ObjectMeta: metav1.ObjectMeta{
 									Name: baseComposableResource.Spec.TargetNode,
 									Annotations: map[string]string{
 										"machine.openshift.io/machine": "openshift-machine-api/machine-worker-0",
 									},
 								},
-							},
-						}
-						for _, node := range nodesToCreate {
+							}
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+							if node.Annotations == nil {
+								node.Annotations = map[string]string{}
+							}
+							node.Annotations["machine.openshift.io/machine"] = "openshift-machine-api/machine-worker-0"
+							Expect(k8sClient.Update(ctx, node)).To(Succeed())
 						}
 
 						machine0 := &machinev1beta1.Metal3Machine{
@@ -5037,12 +5442,27 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, resourceSlice)).NotTo(HaveOccurred())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -5068,7 +5488,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Detaching"
 						composableResourceStatus.Error = "remove failed due to some reasons"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-fail-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-fail-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-fail-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -5081,11 +5501,19 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+						if k8serrors.IsNotFound(err) {
+							Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+						}
+
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -5120,18 +5548,23 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, draPod)).NotTo(HaveOccurred())
 
-						nodesToCreate := []*corev1.Node{
-							{
+						if k8serrors.IsNotFound(err) {
+							node = &corev1.Node{
 								ObjectMeta: metav1.ObjectMeta{
 									Name: baseComposableResource.Spec.TargetNode,
 									Annotations: map[string]string{
 										"machine.openshift.io/machine": "openshift-machine-api/machine-worker-0",
 									},
 								},
-							},
-						}
-						for _, node := range nodesToCreate {
+							}
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+							if node.Annotations == nil {
+								node.Annotations = map[string]string{}
+							}
+							node.Annotations["machine.openshift.io/machine"] = "openshift-machine-api/machine-worker-0"
+							Expect(k8sClient.Update(ctx, node)).To(Succeed())
 						}
 
 						machine0 := &machinev1beta1.Metal3Machine{
@@ -5215,12 +5648,27 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResource.Status.DeviceID = "GPU-device00-uuid-temp-0000-111100000000"
 						Expect(k8sClient.Status().Update(ctx, composableResource)).NotTo(HaveOccurred())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -5252,11 +5700,19 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+						if k8serrors.IsNotFound(err) {
+							Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+						}
+
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -5302,6 +5758,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -5394,12 +5851,41 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, resourceSlice)).NotTo(HaveOccurred())
 
+						// Patch RestartDaemonset to update ResourceSlice (remove GPU)
+						patches.ApplyFunc(
+							utils.RestartDaemonset,
+							func(ctx context.Context, client client.Client, namespace, name string) error {
+								// When DaemonSet is restarted, update ResourceSlice to remove the GPU
+								rs := &resourcev1.ResourceSlice{}
+								if err := k8sClient.Get(ctx, types.NamespacedName{Name: "resourceslice-test"}, rs); err == nil {
+									rs.Spec.Devices = []resourcev1.Device{} // Remove GPU
+									k8sClient.Update(ctx, rs)
+								}
+								return nil
+							},
+						)
+
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -5494,18 +5980,6 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					cleanAllComposableResources()
 				})
 			},
-				Entry("should fail because targetNode can not be found in cluster", testcase{
-					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
-					cluster_uuid: "cluster0-uuid-temp-0000-000000000000",
-
-					resourceName:   "test-composable-resource",
-					resourceSpec:   baseComposableResource.Spec.DeepCopy(),
-					resourceStatus: baseComposableResource.Status.DeepCopy(),
-
-					extraHandling: deleteComposableResource,
-
-					expectedReconcileError: "nodes \"worker-0\" not found",
-				}),
 				Entry("should succeed when the ComposableResource can be directly deleted", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
 					cluster_uuid: "cluster0-uuid-temp-0000-000000000000",
@@ -5526,41 +6000,10 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 					},
-				}),
-				Entry("should wait when the ComposableResource can not be directly deleted", testcase{
-					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
-					cluster_uuid: "cluster0-uuid-temp-0000-000000000000",
-
-					resourceName:   "test-composable-resource",
-					resourceSpec:   baseComposableResource.Spec.DeepCopy(),
-					resourceStatus: baseComposableResource.Status.DeepCopy(),
-
-					extraHandling: func(composableResourceName string) {
-						deleteComposableResource(composableResourceName)
-
-						nodesToCreate := []*corev1.Node{
-							{
-								ObjectMeta: metav1.ObjectMeta{
-									Name: baseComposableResource.Spec.TargetNode,
-								},
-								Spec: corev1.NodeSpec{
-									Unschedulable: true,
-								},
-							},
-						}
-						for _, node := range nodesToCreate {
-							Expect(k8sClient.Create(ctx, node)).To(Succeed())
-						}
-					},
-
-					expectedRequestStatus: func() *crov1alpha1.ComposableResourceStatus {
-						composableResourceStatus := baseComposableResource.Status.DeepCopy()
-						composableResourceStatus.State = "Deleting"
-						return composableResourceStatus
-					}(),
 				}),
 			)
 		})
@@ -5595,6 +6038,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 				expectedRequestStatus  *crov1alpha1.ComposableResourceStatus
 				expectedReconcileError string
+				expectedRequestDeleted bool
 			}
 
 			BeforeAll(func() {
@@ -5615,6 +6059,10 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				if tc.expectedReconcileError != "" {
 					Expect(err).To(HaveOccurred())
 					Expect(err.Error()).To(Equal(tc.expectedReconcileError))
+				} else if tc.expectedRequestDeleted {
+					Expect(err).NotTo(HaveOccurred())
+					Expect(composableResource).NotTo(BeNil())
+					Expect(composableResource.DeletionTimestamp).NotTo(BeNil())
 				} else {
 					Expect(err).NotTo(HaveOccurred())
 					Expect(composableResource.Status).To(Equal(*tc.expectedRequestStatus))
@@ -5669,7 +6117,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceSpec:   baseComposableResource.Spec.DeepCopy(),
 					resourceStatus: baseComposableResource.Status.DeepCopy(),
 
-					expectedReconcileError: "nodes \"worker-0\" not found",
+					expectedRequestDeleted: true,
 				}),
 				Entry("should fail when trying to add resource because the annotation is not found in targetNode", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -5688,6 +6136,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 					},
@@ -5714,6 +6163,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 					},
@@ -5740,6 +6190,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -5774,6 +6225,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -5811,6 +6263,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -5856,6 +6309,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -5920,6 +6374,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -5984,6 +6439,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -6048,6 +6504,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -6112,6 +6569,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -6176,6 +6634,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -6240,6 +6699,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -6304,6 +6764,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -6429,6 +6890,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -6605,6 +7067,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -6753,7 +7216,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						)
 					},
 
-					expectedReconcileError: "get gpu info command failed: err='<nil>', stderr='nvidia-smi: command not found'",
+					expectedReconcileError: "get gpu info command failed: err: '<nil>', stderr: 'nvidia-smi: command not found', stdout: ''",
 				}),
 				Entry("should successfully enter Online state when the added gpu has been recognized by cluster", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -6775,6 +7238,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -6951,6 +7415,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -7145,6 +7610,28 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				expectedReconcileError string
 			}
 
+			BeforeEach(func() {
+				node := &corev1.Node{}
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+				if k8serrors.IsNotFound(err) {
+					Expect(k8sClient.Create(ctx, &corev1.Node{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: worker0Name,
+							Annotations: map[string]string{
+								"machine.openshift.io/machine": "openshift-machine-api/machine-worker-0",
+							},
+						},
+					})).To(Succeed())
+				} else {
+					Expect(err).NotTo(HaveOccurred())
+					if node.Annotations == nil {
+						node.Annotations = map[string]string{}
+					}
+					node.Annotations["machine.openshift.io/machine"] = "openshift-machine-api/machine-worker-0"
+					Expect(k8sClient.Update(ctx, node)).To(Succeed())
+				}
+			})
+
 			DescribeTable("", func(tc testcase) {
 				os.Setenv("FTI_CDI_TENANT_ID", tc.tenant_uuid)
 				os.Setenv("FTI_CDI_CLUSTER_ID", tc.cluster_uuid)
@@ -7190,7 +7677,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -7206,6 +7693,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 					},
@@ -7215,7 +7703,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.Error = "metal3machines.infrastructure.cluster.x-k8s.io \"machine-worker-0\" not found"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -7228,7 +7716,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -7244,6 +7732,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -7289,9 +7778,9 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					expectedRequestStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.State = "Online"
-						composableResourceStatus.Error = "failed to process FM get request. FM return code: 'E02XXXX', error message: 'machine not found'"
+						composableResourceStatus.Error = "failed to process FM get request. FM returned code: 'E02XXXX', error message: 'machine not found'"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -7304,7 +7793,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -7320,6 +7809,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -7367,7 +7857,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.Error = "failed to unmarshal FM get error response body into errBody. Original error: invalid character '<' looking for beginning of value"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -7380,7 +7870,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -7396,6 +7886,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -7443,7 +7934,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.Error = "failed to unmarshal FM get machine response body into machineData: invalid character '<' looking for beginning of value"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -7472,6 +7963,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -7531,7 +8023,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -7547,6 +8039,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -7594,7 +8087,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.Error = "the target device 'GPU-device00-uuid-temp-0000-000000000000' cannot be found in CDI system"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -7624,6 +8117,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -7684,7 +8178,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -7700,6 +8194,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -7747,7 +8242,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.Error = "the target gpu 'GPU-device00-uuid-temp-0000-000000000000' is showing a Critical status in FM"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -7760,7 +8255,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
@@ -7776,6 +8271,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -7823,7 +8319,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.State = "Online"
 						composableResourceStatus.Error = "the target gpu 'GPU-device00-uuid-temp-0000-000000000000' has unknown status '3' in FM"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 				}),
@@ -7863,10 +8359,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 				setErrorMode           func()
 				expectedReconcileError string
+				expectedRequestDeleted bool
 			}
 
 			BeforeAll(func() {
 				patches = gomonkey.NewPatches()
+			})
+
+			BeforeEach(func() {
+				node := &corev1.Node{}
+				err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+				if k8serrors.IsNotFound(err) {
+					Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+				} else {
+					Expect(err).NotTo(HaveOccurred())
+				}
 			})
 
 			DescribeTable("", func(tc testcase) {
@@ -7883,6 +8390,10 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				if tc.expectedReconcileError != "" {
 					Expect(err).To(HaveOccurred())
 					Expect(err.Error()).To(Equal(tc.expectedReconcileError))
+				} else if tc.expectedRequestDeleted {
+					Expect(err).NotTo(HaveOccurred())
+					Expect(composableResource).NotTo(BeNil())
+					Expect(composableResource.DeletionTimestamp).NotTo(BeNil())
 				} else {
 					Expect(err).NotTo(HaveOccurred())
 					Expect(composableResource.Status).To(Equal(*tc.expectedRequestStatus))
@@ -7922,24 +8433,11 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 					cleanAllComposableResources()
 
+					Expect(k8sClient.DeleteAllOf(ctx, &gpuv1.ClusterPolicy{})).NotTo(HaveOccurred())
+
 					patches.Reset()
 				})
 			},
-				Entry("should fail when checking gpu loads because nvidia-driver-daemonset pod can not be found", testcase{
-					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
-					cluster_uuid: "cluster0-uuid-temp-0000-000000000000",
-
-					resourceName: "test-composable-resource",
-					resourceSpec: baseComposableResource.Spec.DeepCopy(),
-					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
-						composableResourceStatus := baseComposableResource.Status.DeepCopy()
-						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						return composableResourceStatus
-					}(),
-
-					expectedReconcileError: "no Pod with label 'app.kubernetes.io/component=nvidia-driver' found on node worker-0",
-				}),
 				Entry("should fail when checking gpu loads because nvidia-smi command failed", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
 					cluster_uuid: "cluster0-uuid-temp-0000-000000000000",
@@ -7949,11 +8447,15 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+
+						Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
+						Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -7970,6 +8472,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
@@ -7983,7 +8500,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						)
 					},
 
-					expectedReconcileError: "run nvidia-smi in pod 'nvidia-driver-daemonset-test' to check gpu loads failed: '<nil>', stderr: 'nvidia-smi: command not found'",
+					expectedReconcileError: "run nvidia-smi in pod 'nvidia-driver-daemonset-test' to check gpu loads failed: '<nil>', stderr: 'nvidia-smi: command not found', stdout: ''",
 				}),
 				Entry("should fail when checking gpu loads because there are gpu loads existed", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -7994,11 +8511,15 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+
+						Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
+						Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -8015,6 +8536,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
@@ -8039,11 +8575,30 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+						if k8serrors.IsNotFound(err) {
+							Expect(k8sClient.Create(ctx, &corev1.Node{
+								ObjectMeta: metav1.ObjectMeta{
+									Name: worker0Name,
+									Annotations: map[string]string{
+										"machine.openshift.io/machine": "openshift-machine-api/machine-worker-0",
+									},
+								},
+							})).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+							if node.Annotations == nil {
+								node.Annotations = map[string]string{}
+							}
+							node.Annotations["machine.openshift.io/machine"] = "openshift-machine-api/machine-worker-0"
+							Expect(k8sClient.Update(ctx, node)).To(Succeed())
+						}
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -8061,12 +8616,27 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -8090,11 +8660,30 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+						if k8serrors.IsNotFound(err) {
+							Expect(k8sClient.Create(ctx, &corev1.Node{
+								ObjectMeta: metav1.ObjectMeta{
+									Name: worker0Name,
+									Annotations: map[string]string{
+										"machine.openshift.io/machine": "openshift-machine-api/machine-worker-0",
+									},
+								},
+							})).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+							if node.Annotations == nil {
+								node.Annotations = map[string]string{}
+							}
+							node.Annotations["machine.openshift.io/machine"] = "openshift-machine-api/machine-worker-0"
+							Expect(k8sClient.Update(ctx, node)).To(Succeed())
+						}
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -8112,12 +8701,27 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -8136,9 +8740,10 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								}
 							},
 						)
+						Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
 					},
 
-					expectedReconcileError: "nodes \"worker-0\" not found",
+					expectedRequestDeleted: true,
 				}),
 
 				Entry("should fail when trying to send scaledown request to FM because the FM returns an error message", testcase{
@@ -8150,11 +8755,30 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+						if k8serrors.IsNotFound(err) {
+							Expect(k8sClient.Create(ctx, &corev1.Node{
+								ObjectMeta: metav1.ObjectMeta{
+									Name: worker0Name,
+									Annotations: map[string]string{
+										"machine.openshift.io/machine": "openshift-machine-api/machine-worker-0",
+									},
+								},
+							})).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+							if node.Annotations == nil {
+								node.Annotations = map[string]string{}
+							}
+							node.Annotations["machine.openshift.io/machine"] = "openshift-machine-api/machine-worker-0"
+							Expect(k8sClient.Update(ctx, node)).To(Succeed())
+						}
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -8183,6 +8807,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -8202,7 +8827,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								Name:      "bmh-worker-0",
 								Namespace: "openshift-machine-api",
 								Annotations: map[string]string{
-									"cluster-manager.cdi.io/machine": "machine0-uuid-temp-fail-000000000000",
+									"cluster-manager.cdi.io/machine": "machine0-uuid-temp-fail-000000000007",
 								},
 							},
 						}
@@ -8224,12 +8849,27 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -8250,7 +8890,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						)
 					},
 
-					expectedReconcileError: "failed to process scaledown request. FM returned code: E02XXXX, error message: scaleup method not found",
+					expectedReconcileError: "failed to process FM scaledown request. FM returned code: 'E02XXXX', error message: 'scaledown method not found'",
 				}),
 				Entry("should fail when trying to send scaledown request to FM because the FM returns a non-JSON formatted error message", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -8261,11 +8901,19 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+						if k8serrors.IsNotFound(err) {
+							Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+						}
+
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -8283,18 +8931,23 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
 
-						nodesToCreate := []*corev1.Node{
-							{
+						if k8serrors.IsNotFound(err) {
+							node = &corev1.Node{
 								ObjectMeta: metav1.ObjectMeta{
 									Name: baseComposableResource.Spec.TargetNode,
 									Annotations: map[string]string{
 										"machine.openshift.io/machine": "openshift-machine-api/machine-worker-0",
 									},
 								},
-							},
-						}
-						for _, node := range nodesToCreate {
+							}
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+							if node.Annotations == nil {
+								node.Annotations = map[string]string{}
+							}
+							node.Annotations["machine.openshift.io/machine"] = "openshift-machine-api/machine-worker-0"
+							Expect(k8sClient.Update(ctx, node)).To(Succeed())
 						}
 
 						machine0 := &machinev1beta1.Metal3Machine{
@@ -8313,7 +8966,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								Name:      "bmh-worker-0",
 								Namespace: "openshift-machine-api",
 								Annotations: map[string]string{
-									"cluster-manager.cdi.io/machine": "machine0-uuid-temp-fail-000000000001",
+									"cluster-manager.cdi.io/machine": "machine0-uuid-temp-fail-000000000008",
 								},
 							},
 						}
@@ -8335,12 +8988,27 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -8373,11 +9041,18 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+						if k8serrors.IsNotFound(err) {
+							Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+						}
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -8406,6 +9081,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -8465,12 +9141,27 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResource.Status.DeviceID = "GPU-device00-uuid-temp-0000-111100000000"
 						Expect(k8sClient.Status().Update(ctx, composableResource)).NotTo(HaveOccurred())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -8502,11 +9193,18 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+						if k8serrors.IsNotFound(err) {
+							Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+						}
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -8535,6 +9233,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -8620,12 +9319,27 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResource.Status.DeviceID = "GPU-device00-uuid-temp-0000-111100000000"
 						Expect(k8sClient.Status().Update(ctx, composableResource)).NotTo(HaveOccurred())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
@@ -8658,11 +9372,18 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
 
 					extraHandling: func(composableResourceName string) {
+						node := &corev1.Node{}
+						err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+						if k8serrors.IsNotFound(err) {
+							Expect(k8sClient.Create(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: worker0Name}})).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+						}
 						nvidiaPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
 								Name:      "nvidia-driver-daemonset-test",
@@ -8691,6 +9412,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						for _, node := range nodesToCreate {
+							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
@@ -8784,13 +9506,30 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, dcgmDaemonset)).NotTo(HaveOccurred())
 
+						clusterPolicy := &gpuv1.ClusterPolicy{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: "cluster-policy",
+							},
+							Spec: gpuv1.ClusterPolicySpec{
+								Operator: gpuv1.OperatorSpec{
+									DefaultRuntime: "docker",
+								},
+								Driver: gpuv1.DriverSpec{
+									Enabled: ptr.To(true),
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=gpu_uuid")) {
+									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("TARGET_FILE")) {
@@ -8879,6 +9618,28 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 			Expect(k8sClient.Create(ctx, pod)).NotTo(HaveOccurred())
 
 			patches = gomonkey.NewPatches()
+		})
+
+		BeforeEach(func() {
+			node := &corev1.Node{}
+			err := k8sClient.Get(ctx, types.NamespacedName{Name: worker0Name}, node)
+			if k8serrors.IsNotFound(err) {
+				Expect(k8sClient.Create(ctx, &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: worker0Name,
+						Annotations: map[string]string{
+							"machine.openshift.io/machine": "openshift-machine-api/machine-worker-0",
+						},
+					},
+				})).To(Succeed())
+			} else {
+				Expect(err).NotTo(HaveOccurred())
+				if node.Annotations == nil {
+					node.Annotations = map[string]string{}
+				}
+				node.Annotations["machine.openshift.io/machine"] = "openshift-machine-api/machine-worker-0"
+				Expect(k8sClient.Update(ctx, node)).To(Succeed())
+			}
 		})
 
 		DescribeTable("", func(tc testcase) {
@@ -8986,7 +9747,20 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						},
 					}
 					for _, node := range nodesToCreate {
-						Expect(k8sClient.Create(ctx, node)).To(Succeed())
+						err := k8sClient.Create(ctx, node)
+						if k8serrors.IsAlreadyExists(err) {
+							existing := &corev1.Node{}
+							Expect(k8sClient.Get(ctx, types.NamespacedName{Name: node.Name}, existing)).To(Succeed())
+							if existing.Annotations == nil {
+								existing.Annotations = map[string]string{}
+							}
+							for k, v := range node.Annotations {
+								existing.Annotations[k] = v
+							}
+							Expect(k8sClient.Update(ctx, existing)).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+						}
 					}
 
 					machine0 := &machinev1beta1.Metal3Machine{
@@ -9099,7 +9873,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				resourceStatus: func() *crov1alpha1.ComposableResourceStatus {
 					composableResourceStatus := baseComposableResource.Status.DeepCopy()
 					composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
-					composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+					composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 					return composableResourceStatus
 				}(),
 				resourceState: "Detaching",
@@ -9150,7 +9924,20 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						},
 					}
 					for _, node := range nodesToCreate {
-						Expect(k8sClient.Create(ctx, node)).To(Succeed())
+						err := k8sClient.Create(ctx, node)
+						if k8serrors.IsAlreadyExists(err) {
+							existing := &corev1.Node{}
+							Expect(k8sClient.Get(ctx, types.NamespacedName{Name: node.Name}, existing)).To(Succeed())
+							if existing.Annotations == nil {
+								existing.Annotations = map[string]string{}
+							}
+							for k, v := range node.Annotations {
+								existing.Annotations[k] = v
+							}
+							Expect(k8sClient.Update(ctx, existing)).To(Succeed())
+						} else {
+							Expect(err).NotTo(HaveOccurred())
+						}
 					}
 
 					machine0 := &machinev1beta1.Metal3Machine{
@@ -9196,7 +9983,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 							if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 								return newMockExecutor("", "")
-							} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=index,gpu_uuid,pci.bus_id")) {
+							} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
 								return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 							} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 								return newMockExecutor("", "")
