@@ -1,4 +1,6 @@
 # composable-resource-operator
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FCoHDI%2Fcomposable-resource-operator.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FCoHDI%2Fcomposable-resource-operator?ref=badge_shield)
+
 // TODO(user): Add simple overview of use/purpose
 
 ## Description
@@ -112,3 +114,6 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
+
+
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FCoHDI%2Fcomposable-resource-operator.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2FCoHDI%2Fcomposable-resource-operator?ref=badge_large)
