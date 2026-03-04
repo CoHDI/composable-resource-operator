@@ -1,4 +1,8 @@
 # composable-resource-operator
+[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/cohdi)](https://artifacthub.io/packages/search?repo=cohdi)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/CoHDI/composable-resource-operator/badge)](https://scorecard.dev/viewer/?uri=github.com/CoHDI/composable-resource-operator)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12016/badge)](https://www.bestpractices.dev/projects/12016)
+
 // TODO(user): Add simple overview of use/purpose
 
 ## Description
