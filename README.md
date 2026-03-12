@@ -1,17 +1,75 @@
 # composable-resource-operator
+
 [![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/cohdi)](https://artifacthub.io/packages/search?repo=cohdi)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/CoHDI/composable-resource-operator/badge)](https://scorecard.dev/viewer/?uri=github.com/CoHDI/composable-resource-operator)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12016/badge)](https://www.bestpractices.dev/projects/12016)
 
-// TODO(user): Add simple overview of use/purpose
+A Kubernetes operator that dynamically attaches and detaches composable hardware resources—such as GPUs and CXL memory—to cluster nodes using the CDI (Composable Device Infrastructure) API.
 
 ## Description
-// TODO(user): An in-depth paragraph about your project and overview of use
+
+Modern data centres increasingly rely on *composable infrastructure*: hardware resources (GPUs, CXL-attached memory, FPGAs) that can be assigned to workloads on demand rather than being permanently bound to a single host. Kubernetes, however, has no built-in concept of composable hardware—resources are statically allocated per node at boot time.
+
+The `composable-resource-operator` bridges that gap. It watches for `ComposabilityRequest` objects created by cluster users or higher-level orchestrators and drives the CDI API to attach or detach the requested device to the target Kubernetes node—without rebooting the node or restarting workloads. When the request is fulfilled the operator updates the internal `ComposableResource` object to reflect the new state of that device and exposes it back through the node's extended resources.
+
+**Supported resource types**
+
+| Type | Description |
+|------|-------------|
+| `gpu` | NVIDIA GPU cards exposed via the CDI composable fabric |
+| `cxl` | CXL-attached memory modules |
+
+## Architecture
+
+The operator exposes two CRDs:
+
+### `ComposabilityRequest` (user-facing)
+
+Created by end users or automation to request that a hardware resource be attached to (or detached from) a node. The spec includes the resource type, size, model, target node, and allocation policy.
+
+### `ComposableResource` (internal)
+
+Tracks the lifecycle of an individual composable device. Managed exclusively by the operator; users should treat this as read-only.
+
+### Reconciliation flow
+
+```
+User creates ComposabilityRequest
+        │
+        ▼
+ComposabilityRequest controller
+  ├── Finds a suitable ComposableResource (or creates one)
+  ├── Calls CDI API → attach/detach device on target node
+  ├── Updates node extended resources via Node status patch
+  └── Reflects outcome in ComposabilityRequest.Status
+```
+
+### Quick example
+
+```yaml
+apiVersion: cro.hpsys.ibm.ie.com/v1alpha1
+kind: ComposabilityRequest
+metadata:
+  name: composabilityrequest-sample
+spec:
+  resource:
+    type: "gpu"
+    size: 2
+    model: "NVIDIA-A100-PCIE-40GB"
+    other_spec:
+      milli_cpu: 2
+      memory: 40
+      ephemeral_storage: 2
+      allowed_pod_number: 5
+    target_node: "node1"
+    force_detach: true
+    allocation_policy: "samenode"
+```
 
 ## Getting Started
 
 ### Prerequisites
-- go version v1.22.0+
+- go version v1.24.0+
 - docker version 17.03+.
 - kubectl version v1.11.3+.
 - Access to a Kubernetes v1.11.3+ cluster.
@@ -94,7 +152,13 @@ kubectl apply -f https://raw.githubusercontent.com/<org>/composable-resource-ope
 ```
 
 ## Contributing
-// TODO(user): Add detailed information on how you would like others to contribute to this project
+
+We welcome contributions! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on
+how to submit bug reports, propose features, and open pull requests.
+
+All contributions require a [DCO](DCO) sign-off (`git commit -s`). By signing off you certify
+that you wrote or otherwise have the right to contribute the code under the project's open-source
+license.
 
 **NOTE:** Run `make help` for more information on all potential `make` targets
 
@@ -115,4 +179,3 @@ distributed under the License is distributed on an "AS IS" BASIS,
 WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
-
