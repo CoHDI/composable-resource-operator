@@ -6,7 +6,7 @@ toolchain go1.24.3
 
 require (
 	github.com/NVIDIA/gpu-operator v1.11.1
-	github.com/agiledragon/gomonkey/v2 v2.11.0
+	github.com/agiledragon/gomonkey/v2 v2.14.0
 	github.com/google/go-cmp v0.7.0
 	github.com/google/uuid v1.6.0
 	github.com/metal3-io/baremetal-operator/apis v0.10.2
