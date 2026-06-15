@@ -146,6 +146,8 @@ func cleanAllComposabilityRequests() {
 }
 
 func cleanAllComposableResources() {
+	deleteAllNvidiaClusterPolicies()
+
 	composableResourceList := &crov1alpha1.ComposableResourceList{}
 	listOpts := []client.ListOption{client.InNamespace("")}
 	Expect(k8sClient.List(ctx, composableResourceList, listOpts...)).To(Succeed())

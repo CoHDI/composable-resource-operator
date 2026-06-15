@@ -110,6 +110,8 @@ func deleteComposableResource(composableResourceName string) {
 }
 
 func createNvidiaDriverDaemonset(namespace string) {
+	createNvidiaClusterPolicy()
+
 	ns := &corev1.Namespace{}
 	err := k8sClient.Get(ctx, types.NamespacedName{Name: namespace}, ns)
 	if k8serrors.IsNotFound(err) {

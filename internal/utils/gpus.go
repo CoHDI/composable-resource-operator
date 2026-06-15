@@ -24,9 +24,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
+	v1alpha3 "k8s.io/api/resource/v1alpha3"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -36,8 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	crov1alpha1 "github.com/CoHDI/composable-resource-operator/api/v1alpha1"
-	v1alpha3 "k8s.io/api/resource/v1alpha3"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	gpuv1 "github.com/NVIDIA/gpu-operator/api/v1"
 )
 
 var gpusLog = ctrl.Log.WithName("utils_gpus")
@@ -73,11 +73,23 @@ func EnsureGPUDriverExists(ctx context.Context, c client.Client, clientset *kube
 }
 
 func detectGPUDriverType(ctx context.Context, c client.Client, clientset *kubernetes.Clientset, restConfig *rest.Config, targetNodeName string) (GPUDriverType, error) {
-	hasContainerDriver, err := hasContainerDriverDaemonset(ctx, c)
+	hasNvidiaDriverPod, err := hasNvidiaDriverDaemonsetPod(ctx, c, targetNodeName)
 	if err != nil {
 		return GPUDriverTypeNone, err
 	}
-	if hasContainerDriver {
+	if hasNvidiaDriverPod {
+		return GPUDriverTypeContainer, nil
+	}
+
+	clusterPolicy, err := getClusterPolicy(ctx, c)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return GPUDriverTypeNone, fmt.Errorf("ClusterPolicy CR was not found. Please install GPU Operator: %w", err)
+		}
+		return GPUDriverTypeNone, fmt.Errorf("failed to get ClusterPolicy: %w", err)
+	}
+
+	if clusterPolicy.Spec.Driver.IsDriverEnabled() {
 		return GPUDriverTypeContainer, nil
 	}
 
@@ -89,32 +101,56 @@ func detectGPUDriverType(ctx context.Context, c client.Client, clientset *kubern
 		return GPUDriverTypeHost, nil
 	}
 
-	return GPUDriverTypeNone, nil
+	return GPUDriverTypeNone, fmt.Errorf("NVIDIA driver was not found. If ClusterPolicy's driver.enabled is false, please install the NVIDIA driver on the host OS")
 }
 
-func hasContainerDriverDaemonset(ctx context.Context, c client.Client) (bool, error) {
-	daemonsetList := &appsv1.DaemonSetList{}
+func getClusterPolicy(ctx context.Context, c client.Client) (*gpuv1.ClusterPolicy, error) {
+	clusterPolicyList := &gpuv1.ClusterPolicyList{}
+
+	if err := c.List(ctx, clusterPolicyList); err != nil {
+		return nil, err
+	}
+	if len(clusterPolicyList.Items) == 0 {
+		return nil, apierrors.NewNotFound(gpuv1.GroupVersion.WithResource("clusterpolicies").GroupResource(), "")
+	}
+
+	return &clusterPolicyList.Items[0], nil
+}
+
+func hasNvidiaDriverDaemonsetPod(ctx context.Context, c client.Client, targetNodeName string) (bool, error) {
+	podList := &corev1.PodList{}
 	listOpts := []client.ListOption{
 		client.InNamespace(""),
 		client.MatchingLabels{"app.kubernetes.io/component": "nvidia-driver"},
 	}
-	if err := c.List(ctx, daemonsetList, listOpts...); err != nil {
-		return false, fmt.Errorf("failed to list nvidia-driver daemonsets: %w", err)
+	if err := c.List(ctx, podList, listOpts...); err != nil {
+		return false, fmt.Errorf("failed to list nvidia-driver-daemonset pods: %w", err)
 	}
 
-	return len(daemonsetList.Items) > 0, nil
+	for i := range podList.Items {
+		if podList.Items[i].Spec.NodeName == targetNodeName {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 func hasHostNvidiaProcDriver(ctx context.Context, clientset *kubernetes.Clientset, restConfig *rest.Config, targetNodeName string) (bool, error) {
 	if clientset == nil || restConfig == nil {
-		return false, nil
+		return false, fmt.Errorf("Kubernetes clientset or REST config is nil. Cannot check the host NVIDIA driver")
+	}
+
+	hasCroNodeAgentDS, err := hasCroNodeAgentDaemonset(ctx, clientset)
+	if err != nil {
+		return false, err
+	}
+	if !hasCroNodeAgentDS {
+		return false, fmt.Errorf("cro-node-agent daemonset was not found. When running with driver.enabled=false, the cro-node-agent daemonset must be deployed. Please check the helm chart option deployPrivilegedAgent")
 	}
 
 	pod, err := getCroNodeAgentPod(ctx, clientset, targetNodeName)
 	if err != nil {
-		if strings.Contains(err.Error(), "no Pod named 'cro-node-agent' found on node") {
-			return false, nil
-		}
 		return false, err
 	}
 
@@ -125,13 +161,25 @@ func hasHostNvidiaProcDriver(ctx context.Context, clientset *kubernetes.Clientse
 		pod.Namespace,
 		pod.Name,
 		pod.Spec.Containers[0].Name,
-		[]string{"/bin/chroot", "/host-root", "/bin/sh", "-c", "if [ -d /proc/driver/nvidia/gpus ] || /usr/sbin/modinfo nvidia > /dev/null 2>&1; then echo true; fi"},
+		[]string{"/bin/chroot", "/host-root", "/bin/sh", "-c", "if /usr/sbin/modinfo nvidia > /dev/null 2>&1; then echo true; fi"},
 	)
 	if stdErr != "" || execErr != nil {
-		return false, fmt.Errorf("failed to check host nvidia driver proc directory: '%v', stderr: '%s', stdout: '%s'", execErr, stdErr, stdOut)
+		return false, fmt.Errorf("failed to check host nvidia driver module: '%v', stderr: '%s', stdout: '%s'", execErr, stdErr, stdOut)
 	}
 
 	return strings.TrimSpace(stdOut) == "true", nil
+}
+
+func hasCroNodeAgentDaemonset(ctx context.Context, clientset *kubernetes.Clientset) (bool, error) {
+	_, err := clientset.AppsV1().DaemonSets("composable-resource-operator-system").Get(ctx, "cro-node-agent", metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to get cro-node-agent daemonset composable-resource-operator-system/cro-node-agent: %v", err)
+	}
+
+	return true, nil
 }
 
 func CheckGPUVisible(ctx context.Context, client client.Client, clientset *kubernetes.Clientset, restConfig *rest.Config, deviceResourceType string, resource *crov1alpha1.ComposableResource) (bool, error) {
@@ -1031,7 +1079,24 @@ func getCroNodeAgentPod(ctx context.Context, clientset *kubernetes.Clientset, ta
 }
 
 func killNvidiaPersistencedInDriverPod(ctx context.Context, clientset *kubernetes.Clientset, restConfig *rest.Config, pod *corev1.Pod) error {
-	command := []string{"/bin/sh", "-c", "pkill -9 -f '[n]vidia-persistenced' >/dev/null 2>&1 || true"}
+	killScript := `
+if command -v pkill >/dev/null 2>&1; then
+	pkill -9 -f '[n]vidia-persistenced' >/dev/null 2>&1 || true
+	exit 0
+fi
+
+for pidDir in /proc/[0-9]*; do
+	[ -r "$pidDir/comm" ] || continue
+	cmdName=$(cat "$pidDir/comm" 2>/dev/null || true)
+	case "$cmdName" in
+		nvidia-persistenced|nvidia-persiste)
+			pid=${pidDir#/proc/}
+			kill -9 "$pid" >/dev/null 2>&1 || true
+			;;
+	esac
+done
+`
+	command := []string{"/bin/sh", "-c", killScript}
 	stdOut, stdErr, execErr := execCommandInPod(
 		ctx,
 		clientset,
@@ -1045,7 +1110,7 @@ func killNvidiaPersistencedInDriverPod(ctx context.Context, clientset *kubernete
 		return fmt.Errorf("failed to kill nvidia-persistenced in pod '%s': '%v', stderr: '%s', stdout: '%s'", pod.Name, execErr, stdErr, stdOut)
 	}
 
-	gpusLog.Info("ran pkill -9 -f nvidia-persistenced in nvidia-driver-daemonset pod", "podName", pod.Name, "namespace", pod.Namespace)
+	gpusLog.Info("ran kill command for nvidia-persistenced in nvidia-driver-daemonset pod", "podName", pod.Name, "namespace", pod.Namespace)
 	return nil
 }
 

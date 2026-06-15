@@ -5,6 +5,7 @@ go 1.24.0
 toolchain go1.24.3
 
 require (
+	github.com/NVIDIA/gpu-operator v1.11.1
 	github.com/agiledragon/gomonkey/v2 v2.11.0
 	github.com/google/go-cmp v0.7.0
 	github.com/google/uuid v1.6.0

@@ -39,6 +39,7 @@ import (
 	crov1alpha1 "github.com/CoHDI/composable-resource-operator/api/v1alpha1"
 	"github.com/CoHDI/composable-resource-operator/internal/controller"
 	webhookcrov1alpha1 "github.com/CoHDI/composable-resource-operator/internal/webhook/v1alpha1"
+	gpuv1 "github.com/NVIDIA/gpu-operator/api/v1"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -51,6 +52,7 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(crov1alpha1.AddToScheme(scheme))
+	utilruntime.Must(gpuv1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 

@@ -24,16 +24,24 @@ import (
 	"reflect"
 	"runtime"
 	"testing"
+	"time"
 
+	gpuv1 "github.com/NVIDIA/gpu-operator/api/v1"
 	metal3v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	machinev1beta1 "github.com/metal3-io/cluster-api-provider-metal3/api/v1beta1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
 	"k8s.io/client-go/util/homedir"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -67,6 +75,69 @@ var (
 	composableResource5Name = "gpu-00000000-temp-uuid-0000-000000000005"
 	composableResource6Name = "gpu-00000000-temp-uuid-0000-000000000006"
 )
+
+func installNvidiaClusterPolicyCRD(ctx context.Context, cfg *rest.Config) {
+	apiExtensionsClient, err := apiextensionsclientset.NewForConfig(cfg)
+	Expect(err).NotTo(HaveOccurred())
+
+	crd, err := apiExtensionsClient.ApiextensionsV1().CustomResourceDefinitions().Create(ctx, &apiextensionsv1.CustomResourceDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "clusterpolicies.nvidia.com",
+		},
+		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
+			Group: "nvidia.com",
+			Names: apiextensionsv1.CustomResourceDefinitionNames{
+				Kind:     "ClusterPolicy",
+				ListKind: "ClusterPolicyList",
+				Plural:   "clusterpolicies",
+				Singular: "clusterpolicy",
+			},
+			Scope: apiextensionsv1.ClusterScoped,
+			Versions: []apiextensionsv1.CustomResourceDefinitionVersion{
+				{
+					Name:    "v1",
+					Served:  true,
+					Storage: true,
+					Schema: &apiextensionsv1.CustomResourceValidation{
+						OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
+							Type:                   "object",
+							XPreserveUnknownFields: ptr.To(true),
+						},
+					},
+				},
+			},
+		},
+	}, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred())
+
+	err = wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, 5*time.Second, true, func(ctx context.Context) (bool, error) {
+		current, err := apiExtensionsClient.ApiextensionsV1().CustomResourceDefinitions().Get(ctx, crd.Name, metav1.GetOptions{})
+		if err != nil {
+			return false, err
+		}
+		for _, condition := range current.Status.Conditions {
+			if condition.Type == apiextensionsv1.Established && condition.Status == apiextensionsv1.ConditionTrue {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+	Expect(err).NotTo(HaveOccurred())
+}
+
+func createNvidiaClusterPolicy() {
+	clusterPolicy := &gpuv1.ClusterPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "gpu-cluster-policy"},
+	}
+	err := k8sClient.Create(ctx, clusterPolicy)
+	if err != nil && !k8serrors.IsAlreadyExists(err) {
+		Expect(err).To(Succeed())
+	}
+}
+
+func deleteAllNvidiaClusterPolicies() {
+	Expect(k8sClient.DeleteAllOf(ctx, &gpuv1.ClusterPolicy{})).NotTo(HaveOccurred())
+}
 
 type myStatusWriter struct {
 	client.StatusWriter
@@ -227,13 +298,14 @@ var _ = BeforeSuite(func() {
 	cfg, err = testEnv.Start()
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
+	installNvidiaClusterPolicyCRD(ctx, cfg)
 
 	s := scheme.Scheme
 	Expect(crov1alpha1.AddToScheme(s)).NotTo(HaveOccurred())
 	Expect(machinev1beta1.AddToScheme(s)).NotTo(HaveOccurred())
 	Expect(metal3v1alpha1.AddToScheme(s)).NotTo(HaveOccurred())
 	Expect(v1alpha3.AddToScheme(s)).NotTo(HaveOccurred())
-
+	Expect(gpuv1.AddToScheme(s)).NotTo(HaveOccurred())
 	// +kubebuilder:scaffold:scheme
 
 	tempClient, err := client.New(cfg, client.Options{Scheme: s})
