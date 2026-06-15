@@ -39,6 +39,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
+	v1alpha3 "k8s.io/api/resource/v1alpha3"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -990,6 +991,254 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceName: "unexisted-composable-resource",
 					resourceSpec: baseComposableResource.Spec.DeepCopy(),
 					ignoreGet:    true,
+				}),
+			)
+		})
+
+		Describe("When performGarbageCollection is triggered", func() {
+			type testcase struct {
+				resourceName   string
+				resourceSpec   *crov1alpha1.ComposableResourceSpec
+				resourceStatus *crov1alpha1.ComposableResourceStatus
+				resourceState  string
+
+				extraHandling func(resourceName string)
+				setErrorMode  func()
+
+				expectedStatus       *crov1alpha1.ComposableResourceStatus
+				expectedDeleted      bool
+				expectedTaintDeleted bool
+				expectedGCDone       bool
+				expectedReconcileErr string
+			}
+
+			var patches *gomonkey.Patches
+			BeforeEach(func() {
+				patches = gomonkey.NewPatches()
+			})
+
+			DescribeTable("", func(tc testcase) {
+				createComposableResource(tc.resourceName, tc.resourceSpec, tc.resourceStatus, tc.resourceState)
+
+				Expect(callFunction(tc.setErrorMode)).NotTo(HaveOccurred())
+				Expect(callFunction(tc.extraHandling, tc.resourceName)).NotTo(HaveOccurred())
+
+				composableResource := &crov1alpha1.ComposableResource{}
+				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: tc.resourceName}, composableResource)).To(Succeed())
+
+				gcDone, err := controllerReconciler.performGarbageCollection(ctx, composableResource)
+
+				if tc.expectedReconcileErr != "" {
+					Expect(err).To(HaveOccurred())
+					Expect(err.Error()).To(Equal(tc.expectedReconcileErr))
+				} else {
+					Expect(err).NotTo(HaveOccurred())
+
+					updatedResource := &crov1alpha1.ComposableResource{}
+					getErr := k8sClient.Get(ctx, types.NamespacedName{Name: tc.resourceName}, updatedResource)
+
+					Expect(gcDone).To(Equal(tc.expectedGCDone))
+
+					if tc.expectedDeleted {
+						Expect(getErr).NotTo(HaveOccurred())
+						Expect(updatedResource.DeletionTimestamp).NotTo(BeNil())
+					} else {
+						Expect(getErr).NotTo(HaveOccurred())
+						Expect(updatedResource.DeletionTimestamp).To(BeNil())
+					}
+
+					if tc.expectedStatus != nil {
+						Expect(updatedResource.Status).To(Equal(*tc.expectedStatus))
+					}
+
+					taintRule := &v1alpha3.DeviceTaintRule{}
+					taintName := fmt.Sprintf("%s-taint", tc.resourceName)
+					taintErr := k8sClient.Get(ctx, types.NamespacedName{Name: taintName}, taintRule)
+
+					if tc.expectedTaintDeleted {
+						Expect(k8serrors.IsNotFound(taintErr)).To(BeTrue())
+					}
+				}
+
+				DeferCleanup(func() {
+					k8sClient.MockGet = nil
+					k8sClient.MockUpdate = nil
+					k8sClient.MockStatusUpdate = nil
+
+					Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
+					Expect(k8sClient.DeleteAllOf(ctx, &v1alpha3.DeviceTaintRule{})).To(Succeed())
+
+					cleanAllComposableResources()
+					patches.Reset()
+				})
+			},
+				Entry("should skip when TargetNode is empty", testcase{
+					resourceName: "gc-empty-target-node",
+					resourceSpec: func() *crov1alpha1.ComposableResourceSpec {
+						spec := baseComposableResource.Spec.DeepCopy()
+						spec.TargetNode = ""
+						return spec
+					}(),
+					resourceStatus: baseComposableResource.Status.DeepCopy(),
+					resourceState:  "Attaching",
+
+					expectedStatus: func() *crov1alpha1.ComposableResourceStatus {
+						status := baseComposableResource.Status.DeepCopy()
+						status.State = "Attaching"
+						return status
+					}(),
+					expectedDeleted: false,
+					expectedGCDone:  false,
+				}),
+
+				Entry("should skip when target node exists", testcase{
+					resourceName:   "gc-node-exists",
+					resourceSpec:   baseComposableResource.Spec.DeepCopy(),
+					resourceStatus: baseComposableResource.Status.DeepCopy(),
+					resourceState:  "Attaching",
+
+					extraHandling: func(resourceName string) {
+						Expect(k8sClient.Create(ctx, &corev1.Node{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: baseComposableResource.Spec.TargetNode,
+							},
+						})).To(Succeed())
+					},
+
+					expectedStatus: func() *crov1alpha1.ComposableResourceStatus {
+						status := baseComposableResource.Status.DeepCopy()
+						status.State = "Attaching"
+						return status
+					}(),
+					expectedDeleted: false,
+					expectedGCDone:  false,
+				}),
+
+				Entry("should transition to Deleting and delete CR when target node is missing and taint is absent", testcase{
+					resourceName:   "gc-node-missing-no-taint",
+					resourceSpec:   baseComposableResource.Spec.DeepCopy(),
+					resourceStatus: baseComposableResource.Status.DeepCopy(),
+					resourceState:  "Attaching",
+
+					expectedStatus: func() *crov1alpha1.ComposableResourceStatus {
+						status := baseComposableResource.Status.DeepCopy()
+						status.State = "Deleting"
+						status.Error = fmt.Sprintf("target node %s not found", baseComposableResource.Spec.TargetNode)
+						return status
+					}(),
+					expectedDeleted: true,
+					expectedGCDone:  true,
+				}),
+
+				Entry("should delete taint and transition to Deleting when target node is missing and taint is present", testcase{
+					resourceName:   "gc-node-missing-with-taint",
+					resourceSpec:   baseComposableResource.Spec.DeepCopy(),
+					resourceStatus: baseComposableResource.Status.DeepCopy(),
+					resourceState:  "Attaching",
+
+					extraHandling: func(resourceName string) {
+						taintRule := &v1alpha3.DeviceTaintRule{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: fmt.Sprintf("%s-taint", resourceName),
+							},
+							Spec: v1alpha3.DeviceTaintRuleSpec{
+								DeviceSelector: &v1alpha3.DeviceTaintSelector{
+									Driver: ptr.To("test-driver"),
+									Pool:   ptr.To("test-pool"),
+									Device: ptr.To("test-device"),
+								},
+								Taint: v1alpha3.DeviceTaint{
+									Key:    "k8s.io/device-uuid",
+									Value:  "fake-device-id",
+									Effect: v1alpha3.DeviceTaintEffectNoSchedule,
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, taintRule)).To(Succeed())
+					},
+
+					expectedStatus: func() *crov1alpha1.ComposableResourceStatus {
+						status := baseComposableResource.Status.DeepCopy()
+						status.State = "Deleting"
+						status.Error = fmt.Sprintf("target node %s not found", baseComposableResource.Spec.TargetNode)
+						return status
+					}(),
+					expectedDeleted:      true,
+					expectedTaintDeleted: true,
+					expectedGCDone:       true,
+				}),
+
+				Entry("should return error when DeleteDeviceTaint fails", testcase{
+					resourceName:   "gc-delete-taint-fails",
+					resourceSpec:   baseComposableResource.Spec.DeepCopy(),
+					resourceStatus: baseComposableResource.Status.DeepCopy(),
+					resourceState:  "Attaching",
+
+					extraHandling: func(resourceName string) {
+						taintRule := &v1alpha3.DeviceTaintRule{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: fmt.Sprintf("%s-taint", resourceName),
+							},
+							Spec: v1alpha3.DeviceTaintRuleSpec{
+								DeviceSelector: &v1alpha3.DeviceTaintSelector{
+									Driver: ptr.To("test-driver"),
+									Pool:   ptr.To("test-pool"),
+									Device: ptr.To("test-device"),
+								},
+								Taint: v1alpha3.DeviceTaint{
+									Key:    "k8s.io/device-uuid",
+									Value:  "fake-device-id",
+									Effect: v1alpha3.DeviceTaintEffectNoSchedule,
+								},
+							},
+						}
+						Expect(k8sClient.Create(ctx, taintRule)).To(Succeed())
+					},
+
+					setErrorMode: func() {
+						patches.ApplyFunc(utils.DeleteDeviceTaint, func(ctx context.Context, c client.Client, cr *crov1alpha1.ComposableResource) error {
+							return errors.New("delete device taint fails")
+						})
+					},
+
+					expectedReconcileErr: "delete device taint fails",
+				}),
+
+				Entry("should do nothing extra when already Deleting and DeletionTimestamp is present", testcase{
+					resourceName:   "gc-already-deleting",
+					resourceSpec:   baseComposableResource.Spec.DeepCopy(),
+					resourceStatus: baseComposableResource.Status.DeepCopy(),
+					resourceState:  "Deleting",
+
+					extraHandling: func(resourceName string) {
+						deleteComposableResource(resourceName)
+					},
+
+					expectedStatus: func() *crov1alpha1.ComposableResourceStatus {
+						status := baseComposableResource.Status.DeepCopy()
+						status.State = "Deleting"
+						return status
+					}(),
+					expectedDeleted: true,
+					expectedGCDone:  false,
+				}),
+
+				Entry("should return error when status update fails during garbage collection", testcase{
+					resourceName:   "gc-status-update-fails",
+					resourceSpec:   baseComposableResource.Spec.DeepCopy(),
+					resourceStatus: baseComposableResource.Status.DeepCopy(),
+					resourceState:  "Attaching",
+
+					setErrorMode: func() {
+						k8sClient.MockStatusUpdate = func(originalUpdate func(client.Object, ...client.SubResourceUpdateOption) error, ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+							if cr, ok := obj.(*crov1alpha1.ComposableResource); ok && cr.Name == "gc-status-update-fails" && cr.Status.State == "Deleting" {
+								return errors.New("status update fails")
+							}
+							return originalUpdate(obj, opts...)
+						}
+					},
+
+					expectedReconcileErr: "status update fails",
 				}),
 			)
 		})
