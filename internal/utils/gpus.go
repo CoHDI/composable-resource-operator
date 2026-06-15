@@ -565,7 +565,11 @@ fi
 					[]string{"/usr/sbin/chroot", nvidiaDriverRoot, "/usr/bin/nvidia-smi", "-i", targetGPUUUID, "-pm", "0"},
 				)
 				if execErr != nil || stdErr != "" {
-					return fmt.Errorf("deatch command 'disable persistence mode' failed: '%v', stderr: '%s', stdout: '%s'", execErr, stdErr, stdOut)
+					if strings.Contains(stdOut, "No devices were found") {
+						gpusLog.Info("GPU is not found for nvidia-smi -i command, skip it", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
+					} else {
+						return fmt.Errorf("deatch command 'disable persistence mode' failed: '%v', stderr: '%s', stdout: '%s'", execErr, stdErr, stdOut)
+					}
 				}
 			} else {
 				gpusLog.Info("GPU is already in draining status, skip the step", "step", "disable persistence mode", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
