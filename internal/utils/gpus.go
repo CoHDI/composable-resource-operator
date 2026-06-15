@@ -125,7 +125,7 @@ func hasHostNvidiaProcDriver(ctx context.Context, clientset *kubernetes.Clientse
 		pod.Namespace,
 		pod.Name,
 		pod.Spec.Containers[0].Name,
-		[]string{"/bin/chroot", "/host-root", "/bin/sh", "-c", "if [ -d /proc/driver/nvidia/gpus ]; then echo true; fi"},
+		[]string{"/bin/chroot", "/host-root", "/bin/sh", "-c", "if [ -d /proc/driver/nvidia/gpus ] || /usr/sbin/modinfo nvidia > /dev/null 2>&1; then echo true; fi"},
 	)
 	if stdErr != "" || execErr != nil {
 		return false, fmt.Errorf("failed to check host nvidia driver proc directory: '%v', stderr: '%s', stdout: '%s'", execErr, stdErr, stdOut)
