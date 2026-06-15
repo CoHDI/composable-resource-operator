@@ -23,6 +23,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -38,8 +39,9 @@ const missingDeviceGracePeriod = 10 * time.Minute
 
 type UpstreamSyncerReconciler struct {
 	client.Client
-	ClientSet *kubernetes.Clientset
-	Scheme    *runtime.Scheme
+	ClientSet  *kubernetes.Clientset
+	RestConfig *rest.Config
+	Scheme     *runtime.Scheme
 
 	missingDevices map[string]time.Time
 }
@@ -136,6 +138,10 @@ func (r *UpstreamSyncerReconciler) syncUpstreamData(ctx context.Context, adapter
 }
 
 func (r *UpstreamSyncerReconciler) createDetachCR(ctx context.Context, deviceInfo cdi.DeviceInfo) error {
+	if err := utils.EnsureGPUDriverExists(ctx, r.Client, r.ClientSet, r.RestConfig, deviceInfo.NodeName); err != nil {
+		return fmt.Errorf("failed to ensure nvidia driver exists on target node before creating detach ComposableResource: %w", err)
+	}
+
 	newCR := &crov1alpha1.ComposableResource{
 		ObjectMeta: ctrl.ObjectMeta{
 			GenerateName: utils.GenerateComposableResourceName("gpu"),

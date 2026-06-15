@@ -30,7 +30,6 @@ import (
 	"strings"
 	"time"
 
-	gpuv1 "github.com/NVIDIA/gpu-operator/api/v1"
 	"github.com/agiledragon/gomonkey/v2"
 	metal3v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	machinev1beta1 "github.com/metal3-io/cluster-api-provider-metal3/api/v1beta1"
@@ -108,6 +107,79 @@ func deleteComposableResource(composableResourceName string) {
 	Expect(k8sClient.Get(ctx, types.NamespacedName{Name: composableResourceName}, resource)).NotTo(HaveOccurred())
 
 	Expect(k8sClient.Delete(ctx, resource)).NotTo(HaveOccurred())
+}
+
+func createNvidiaDriverDaemonset(namespace string) {
+	ns := &corev1.Namespace{}
+	err := k8sClient.Get(ctx, types.NamespacedName{Name: namespace}, ns)
+	if k8serrors.IsNotFound(err) {
+		Expect(k8sClient.Create(ctx, &corev1.Namespace{
+			ObjectMeta: metav1.ObjectMeta{Name: namespace},
+		})).To(Succeed())
+	} else {
+		Expect(err).NotTo(HaveOccurred())
+	}
+
+	driverDaemonset := &appsv1.DaemonSet{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "nvidia-driver-daemonset",
+			Namespace: namespace,
+			Labels: map[string]string{
+				"app.kubernetes.io/component": "nvidia-driver",
+			},
+		},
+		Spec: appsv1.DaemonSetSpec{
+			Selector: &metav1.LabelSelector{
+				MatchLabels: map[string]string{
+					"app.kubernetes.io/component": "nvidia-driver",
+				},
+			},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{
+						"app.kubernetes.io/component": "nvidia-driver",
+					},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name:  "nvidia-driver-ctr",
+							Image: "nvcr.io/nvidia/driver",
+						},
+					},
+				},
+			},
+		},
+	}
+	err = k8sClient.Create(ctx, driverDaemonset)
+	if err != nil && !k8serrors.IsAlreadyExists(err) {
+		Expect(err).To(Succeed())
+	}
+}
+
+func mustCreateReadyPod(pod *corev1.Pod) {
+	Expect(k8sClient.Create(ctx, pod)).NotTo(HaveOccurred())
+	pod.Status = corev1.PodStatus{
+		Phase: corev1.PodRunning,
+		Conditions: []corev1.PodCondition{
+			{
+				Type:   corev1.PodReady,
+				Status: corev1.ConditionTrue,
+			},
+		},
+	}
+	Expect(k8sClient.Status().Update(ctx, pod)).To(Succeed())
+}
+
+func isGPUInfoFromProcCommand(rawQuery string) bool {
+	return strings.Contains(rawQuery, neturl.QueryEscape("/proc/driver/nvidia/gpus")) ||
+		strings.Contains(rawQuery, neturl.QueryEscape("Device Minor:"))
+}
+
+func isGPUDrainStatusCommand(rawQuery string) bool {
+	return strings.Contains(rawQuery, "command=drain") &&
+		strings.Contains(rawQuery, "command=-p") &&
+		strings.Contains(rawQuery, "command=-q")
 }
 
 func generateCMMachineData(isAttachFailed bool, isDetachFailed bool, isSucceeded bool, isCompleteButError *string) []byte {
@@ -1480,6 +1552,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				os.Setenv("FTI_CDI_CLUSTER_ID", tc.cluster_uuid)
 
 				createComposableResource(tc.resourceName, tc.resourceSpec, tc.resourceStatus, "Attaching")
+				createNvidiaDriverDaemonset("gpu-operator")
 
 				Expect(callFunction(tc.setErrorMode)).NotTo(HaveOccurred())
 				Expect(callFunction(tc.extraHandling, tc.resourceName)).NotTo(HaveOccurred())
@@ -1535,7 +1608,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 					cleanAllComposableResources()
 
-					Expect(k8sClient.DeleteAllOf(ctx, &gpuv1.ClusterPolicy{})).NotTo(HaveOccurred())
+					Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("gpu-operator"))).NotTo(HaveOccurred())
 
 					patches.Reset()
 				})
@@ -1575,6 +1648,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
+						createNvidiaDriverDaemonset("gpu-operator")
 					},
 
 					expectedReconcileError: "failed to get annotation 'machine.openshift.io/machine' from Node worker-0, now is ''",
@@ -1602,6 +1676,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
+						createNvidiaDriverDaemonset("gpu-operator")
 					},
 
 					expectedReconcileError: "metal3machines.infrastructure.cluster.x-k8s.io \"machine-worker-0\" not found",
@@ -1629,6 +1704,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						machine0 := &machinev1beta1.Metal3Machine{
 							ObjectMeta: metav1.ObjectMeta{
@@ -1664,6 +1740,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						machine0 := &machinev1beta1.Metal3Machine{
 							ObjectMeta: metav1.ObjectMeta{
@@ -1702,6 +1779,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						machine0 := &machinev1beta1.Metal3Machine{
 							ObjectMeta: metav1.ObjectMeta{
@@ -1748,6 +1826,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						machine0 := &machinev1beta1.Metal3Machine{
 							ObjectMeta: metav1.ObjectMeta{
@@ -1797,6 +1876,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						machine0 := &machinev1beta1.Metal3Machine{
 							ObjectMeta: metav1.ObjectMeta{
@@ -1862,6 +1942,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						machine0 := &machinev1beta1.Metal3Machine{
 							ObjectMeta: metav1.ObjectMeta{
@@ -1927,6 +2008,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						machine0 := &machinev1beta1.Metal3Machine{
 							ObjectMeta: metav1.ObjectMeta{
@@ -1992,6 +2074,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						machine0 := &machinev1beta1.Metal3Machine{
 							ObjectMeta: metav1.ObjectMeta{
@@ -2057,6 +2140,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						machine0 := &machinev1beta1.Metal3Machine{
 							ObjectMeta: metav1.ObjectMeta{
@@ -2122,6 +2206,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						machine0 := &machinev1beta1.Metal3Machine{
 							ObjectMeta: metav1.ObjectMeta{
@@ -2187,6 +2272,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						machine0 := &machinev1beta1.Metal3Machine{
 							ObjectMeta: metav1.ObjectMeta{
@@ -2252,6 +2338,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						machine0 := &machinev1beta1.Metal3Machine{
 							ObjectMeta: metav1.ObjectMeta{
@@ -2317,6 +2404,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						machine0 := &machinev1beta1.Metal3Machine{
 							ObjectMeta: metav1.ObjectMeta{
@@ -2382,6 +2470,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						machine0 := &machinev1beta1.Metal3Machine{
 							ObjectMeta: metav1.ObjectMeta{
@@ -2447,6 +2536,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						machine0 := &machinev1beta1.Metal3Machine{
 							ObjectMeta: metav1.ObjectMeta{
@@ -2516,6 +2606,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						machine0 := &machinev1beta1.Metal3Machine{
 							ObjectMeta: metav1.ObjectMeta{
@@ -2581,6 +2672,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.DeleteAllOf(ctx, node)).To(Succeed())
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						machine0 := &machinev1beta1.Metal3Machine{
 							ObjectMeta: metav1.ObjectMeta{
@@ -2645,27 +2737,13 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, draDaemonset)).NotTo(HaveOccurred())
-
-						clusterPolicy := &gpuv1.ClusterPolicy{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "cluster-policy",
-							},
-							Spec: gpuv1.ClusterPolicySpec{
-								Operator: gpuv1.OperatorSpec{
-									DefaultRuntime: "docker",
-								},
-								Driver: gpuv1.DriverSpec{
-									Enabled: ptr.To(true),
-								},
-							},
-						}
-						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+						createNvidiaDriverDaemonset("gpu-operator")
 					},
 
 					expectedRequestStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.State = "Attaching"
-						composableResourceStatus.Error = "no Pod with label 'app.kubernetes.io/component=nvidia-driver' found on node worker-0"
+						composableResourceStatus.Error = "nvidia-driver-daemonset pod is not found on node worker-0"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
 						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
@@ -2747,29 +2825,27 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 									{Name: "nvidia-driver-ctr", Image: "nvcr.io/nvidia/driver"},
 								},
 							},
-						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
-
-						clusterPolicy := &gpuv1.ClusterPolicy{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "cluster-policy",
-							},
-							Spec: gpuv1.ClusterPolicySpec{
-								Operator: gpuv1.OperatorSpec{
-									DefaultRuntime: "docker",
-								},
-								Driver: gpuv1.DriverSpec{
-									Enabled: ptr.To(true),
+							Status: corev1.PodStatus{
+								Phase: corev1.PodRunning,
+								Conditions: []corev1.PodCondition{
+									{
+										Type:   corev1.PodReady,
+										Status: corev1.ConditionTrue,
+									},
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=gpu_uuid")) {
 									return newMockExecutor("GPU-device00-uuid-temp-0000-000000000000", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
 								}
@@ -2863,7 +2939,9 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						draDaemonset := &appsv1.DaemonSet{
 							ObjectMeta: metav1.ObjectMeta{
@@ -2890,27 +2968,15 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, draDaemonset)).NotTo(HaveOccurred())
-
-						clusterPolicy := &gpuv1.ClusterPolicy{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "cluster-policy",
-							},
-							Spec: gpuv1.ClusterPolicySpec{
-								Operator: gpuv1.OperatorSpec{
-									DefaultRuntime: "docker",
-								},
-								Driver: gpuv1.DriverSpec{
-									Enabled: ptr.To(true),
-								},
-							},
-						}
-						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=gpu_uuid")) {
 									return newMockExecutor("GPU-device00-uuid-temp-0000-000000000000", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
 								}
@@ -3003,7 +3069,9 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						draDaemonset := &appsv1.DaemonSet{
 							ObjectMeta: metav1.ObjectMeta{
@@ -3033,27 +3101,15 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, draDaemonset)).NotTo(HaveOccurred())
-
-						clusterPolicy := &gpuv1.ClusterPolicy{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "cluster-policy",
-							},
-							Spec: gpuv1.ClusterPolicySpec{
-								Operator: gpuv1.OperatorSpec{
-									DefaultRuntime: "docker",
-								},
-								Driver: gpuv1.DriverSpec{
-									Enabled: ptr.To(true),
-								},
-							},
-						}
-						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=gpu_uuid")) {
 									return newMockExecutor("GPU-device00-uuid-temp-0000-000000000000", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
 								}
@@ -3146,7 +3202,9 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						draDaemonset := &appsv1.DaemonSet{
 							ObjectMeta: metav1.ObjectMeta{
@@ -3187,27 +3245,15 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						Expect(k8sClient.Create(ctx, draDaemonsetToCreate)).NotTo(HaveOccurred())
 						draDaemonsetToCreate.Status = *draDaemonset.Status.DeepCopy()
 						Expect(k8sClient.Status().Update(ctx, draDaemonsetToCreate)).To(Succeed())
-
-						clusterPolicy := &gpuv1.ClusterPolicy{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "cluster-policy",
-							},
-							Spec: gpuv1.ClusterPolicySpec{
-								Operator: gpuv1.OperatorSpec{
-									DefaultRuntime: "docker",
-								},
-								Driver: gpuv1.DriverSpec{
-									Enabled: ptr.To(true),
-								},
-							},
-						}
-						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=gpu_uuid")) {
 									return newMockExecutor("GPU-device00-uuid-temp-0000-000000000000", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
 								}
@@ -3300,7 +3346,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						draDaemonset := &appsv1.DaemonSet{
 							ObjectMeta: metav1.ObjectMeta{
@@ -3344,6 +3391,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=gpu_uuid")) {
 									return newMockExecutor("GPU-device00-uuid-temp-0000-000000000000", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
 								}
@@ -3437,7 +3486,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						draDaemonset := &appsv1.DaemonSet{
 							ObjectMeta: metav1.ObjectMeta{
@@ -3495,6 +3545,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=gpu_uuid")) {
 									return newMockExecutor("GPU-device00-uuid-temp-0000-000000000000", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
 								}
@@ -3635,7 +3687,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						draDaemonset := &appsv1.DaemonSet{
 							ObjectMeta: metav1.ObjectMeta{
@@ -3693,6 +3746,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=gpu_uuid")) {
 									return newMockExecutor("GPU-device00-uuid-temp-0000-000000000000", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
 								}
@@ -4486,7 +4541,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 					cleanAllComposableResources()
 
-					Expect(k8sClient.DeleteAllOf(ctx, &gpuv1.ClusterPolicy{})).NotTo(HaveOccurred())
+					Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("gpu-operator"))).NotTo(HaveOccurred())
 
 					patches.Reset()
 				})
@@ -4523,28 +4578,17 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
-
-						clusterPolicy := &gpuv1.ClusterPolicy{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "cluster-policy",
-							},
-							Spec: gpuv1.ClusterPolicySpec{
-								Operator: gpuv1.OperatorSpec{
-									DefaultRuntime: "docker",
-								},
-								Driver: gpuv1.DriverSpec{
-									Enabled: ptr.To(true),
-								},
-							},
-						}
-						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "nvidia-smi: command not found")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
 								}
@@ -4586,28 +4630,17 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
-
-						clusterPolicy := &gpuv1.ClusterPolicy{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "cluster-policy",
-							},
-							Spec: gpuv1.ClusterPolicySpec{
-								Operator: gpuv1.OperatorSpec{
-									DefaultRuntime: "docker",
-								},
-								Driver: gpuv1.DriverSpec{
-									Enabled: ptr.To(true),
-								},
-							},
-						}
-						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("GPU-device00-uuid-temp-0000-000000000000, gpu_load_progress", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
 								}
@@ -4650,7 +4683,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						resourceSlice := &resourcev1.ResourceSlice{
 							ObjectMeta: metav1.ObjectMeta{
@@ -4676,33 +4710,23 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, resourceSlice)).NotTo(HaveOccurred())
-
-						clusterPolicy := &gpuv1.ClusterPolicy{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "cluster-policy",
-							},
-							Spec: gpuv1.ClusterPolicySpec{
-								Operator: gpuv1.OperatorSpec{
-									DefaultRuntime: "docker",
-								},
-								Driver: gpuv1.DriverSpec{
-									Enabled: ptr.To(true),
-								},
-							},
-						}
-						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) || isGPUInfoFromProcCommand(url.RawQuery) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
+								} else if isGPUDrainStatusCommand(url.RawQuery) {
+									return newMockExecutor("Drain State: Not Draining", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("TARGET_FILE")) {
 									return newMockExecutor("nvidia-persist", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
 								}
@@ -4710,9 +4734,9 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						)
 					},
 
-					expectedReconcileError: "check /dev/nvidiaX command failed: there is a process nvidia-persist occupied the nvidiaX file",
+					expectedReconcileError: "check /dev/nvidiaX command in nvidia-driver-daemonset driver root failed: there is a process nvidia-persist occupied the nvidiaX file",
 				}),
-				Entry("should fail when draining gpu because nvidia-dra-driver-gpu-kubelet-plugin pod can not be found", testcase{
+				Entry("should fail when draining gpu because the target node is missing machine annotation", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
 					cluster_uuid: "cluster0-uuid-temp-0000-000000000000",
 
@@ -4744,7 +4768,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						resourceSlice := &resourcev1.ResourceSlice{
 							ObjectMeta: metav1.ObjectMeta{
@@ -4770,31 +4795,19 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, resourceSlice)).NotTo(HaveOccurred())
-
-						clusterPolicy := &gpuv1.ClusterPolicy{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "cluster-policy",
-							},
-							Spec: gpuv1.ClusterPolicySpec{
-								Operator: gpuv1.OperatorSpec{
-									DefaultRuntime: "docker",
-								},
-								Driver: gpuv1.DriverSpec{
-									Enabled: ptr.To(true),
-								},
-							},
-						}
-						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) || isGPUInfoFromProcCommand(url.RawQuery) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
+								} else if isGPUDrainStatusCommand(url.RawQuery) {
+									return newMockExecutor("Drain State: Not Draining", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("TARGET_FILE")) {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("/run/nvidia/driver/dev/nvidia")) {
@@ -4805,6 +4818,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
 									return newMockExecutor("", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
 								}
@@ -4812,7 +4827,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						)
 					},
 
-					expectedReconcileError: "no Pod named 'nvidia-dra-driver-gpu-kubelet-plugin' found on node worker-0",
+					expectedReconcileError: "failed to get annotation 'machine.openshift.io/machine' from Node worker-0, now is ''",
 				}),
 				Entry("should fail when removing gpu because the targetNode can not be found in cluster", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -4851,7 +4866,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						draPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
@@ -4894,31 +4910,19 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, resourceSlice)).NotTo(HaveOccurred())
-
-						clusterPolicy := &gpuv1.ClusterPolicy{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "cluster-policy",
-							},
-							Spec: gpuv1.ClusterPolicySpec{
-								Operator: gpuv1.OperatorSpec{
-									DefaultRuntime: "docker",
-								},
-								Driver: gpuv1.DriverSpec{
-									Enabled: ptr.To(true),
-								},
-							},
-						}
-						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) || isGPUInfoFromProcCommand(url.RawQuery) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
+								} else if isGPUDrainStatusCommand(url.RawQuery) {
+									return newMockExecutor("Drain State: Not Draining", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("TARGET_FILE")) {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("/run/nvidia/driver/dev/nvidia")) {
@@ -4928,6 +4932,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								} else if strings.Contains(url.RawQuery, "command=-m&command=1") {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
+									return newMockExecutor("", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -4976,7 +4982,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						draPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
@@ -5072,31 +5079,19 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, resourceSlice)).NotTo(HaveOccurred())
-
-						clusterPolicy := &gpuv1.ClusterPolicy{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "cluster-policy",
-							},
-							Spec: gpuv1.ClusterPolicySpec{
-								Operator: gpuv1.OperatorSpec{
-									DefaultRuntime: "docker",
-								},
-								Driver: gpuv1.DriverSpec{
-									Enabled: ptr.To(true),
-								},
-							},
-						}
-						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) || isGPUInfoFromProcCommand(url.RawQuery) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
+								} else if isGPUDrainStatusCommand(url.RawQuery) {
+									return newMockExecutor("Drain State: Not Draining", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("TARGET_FILE")) {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("/run/nvidia/driver/dev/nvidia")) {
@@ -5106,6 +5101,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								} else if strings.Contains(url.RawQuery, "command=-m&command=1") {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
+									return newMockExecutor("", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -5148,7 +5145,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						draPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
@@ -5250,31 +5248,19 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, resourceSlice)).NotTo(HaveOccurred())
-
-						clusterPolicy := &gpuv1.ClusterPolicy{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "cluster-policy",
-							},
-							Spec: gpuv1.ClusterPolicySpec{
-								Operator: gpuv1.OperatorSpec{
-									DefaultRuntime: "docker",
-								},
-								Driver: gpuv1.DriverSpec{
-									Enabled: ptr.To(true),
-								},
-							},
-						}
-						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) || isGPUInfoFromProcCommand(url.RawQuery) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
+								} else if isGPUDrainStatusCommand(url.RawQuery) {
+									return newMockExecutor("Drain State: Not Draining", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("TARGET_FILE")) {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("/run/nvidia/driver/dev/nvidia")) {
@@ -5284,6 +5270,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								} else if strings.Contains(url.RawQuery, "command=-m&command=1") {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
+									return newMockExecutor("", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -5333,7 +5321,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						draPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
@@ -5429,31 +5418,19 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, resourceSlice)).NotTo(HaveOccurred())
-
-						clusterPolicy := &gpuv1.ClusterPolicy{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "cluster-policy",
-							},
-							Spec: gpuv1.ClusterPolicySpec{
-								Operator: gpuv1.OperatorSpec{
-									DefaultRuntime: "docker",
-								},
-								Driver: gpuv1.DriverSpec{
-									Enabled: ptr.To(true),
-								},
-							},
-						}
-						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) || isGPUInfoFromProcCommand(url.RawQuery) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
+								} else if isGPUDrainStatusCommand(url.RawQuery) {
+									return newMockExecutor("Drain State: Not Draining", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("TARGET_FILE")) {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("/run/nvidia/driver/dev/nvidia")) {
@@ -5463,6 +5440,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								} else if strings.Contains(url.RawQuery, "command=-m&command=1") {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
+									return newMockExecutor("", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -5510,7 +5489,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						draPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
@@ -5606,31 +5586,19 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, resourceSlice)).NotTo(HaveOccurred())
-
-						clusterPolicy := &gpuv1.ClusterPolicy{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "cluster-policy",
-							},
-							Spec: gpuv1.ClusterPolicySpec{
-								Operator: gpuv1.OperatorSpec{
-									DefaultRuntime: "docker",
-								},
-								Driver: gpuv1.DriverSpec{
-									Enabled: ptr.To(true),
-								},
-							},
-						}
-						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) || isGPUInfoFromProcCommand(url.RawQuery) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
+								} else if isGPUDrainStatusCommand(url.RawQuery) {
+									return newMockExecutor("Drain State: Not Draining", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("TARGET_FILE")) {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("/run/nvidia/driver/dev/nvidia")) {
@@ -5640,6 +5608,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								} else if strings.Contains(url.RawQuery, "command=-m&command=1") {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
+									return newMockExecutor("", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -5704,7 +5674,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						draPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
@@ -5804,31 +5775,19 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, resourceSlice)).NotTo(HaveOccurred())
-
-						clusterPolicy := &gpuv1.ClusterPolicy{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "cluster-policy",
-							},
-							Spec: gpuv1.ClusterPolicySpec{
-								Operator: gpuv1.OperatorSpec{
-									DefaultRuntime: "docker",
-								},
-								Driver: gpuv1.DriverSpec{
-									Enabled: ptr.To(true),
-								},
-							},
-						}
-						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) || isGPUInfoFromProcCommand(url.RawQuery) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
+								} else if isGPUDrainStatusCommand(url.RawQuery) {
+									return newMockExecutor("Drain State: Not Draining", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("TARGET_FILE")) {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("/run/nvidia/driver/dev/nvidia")) {
@@ -5838,6 +5797,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								} else if strings.Contains(url.RawQuery, "command=-m&command=1") {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
+									return newMockExecutor("", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -5855,7 +5816,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						return composableResourceStatus
 					}(),
 				}),
-				Entry("should fail when the nvidia-dra-driver-gpu-kubelet-plugin pod can not be found in cluster", testcase{
+				Entry("should fail when detaching because the target node is missing machine annotation", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
 					cluster_uuid: "cluster0-uuid-temp-0000-000000000000",
 
@@ -5892,7 +5853,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						draPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
@@ -6010,31 +5972,19 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						Expect(k8sClient.Create(ctx, composableResource)).To(Succeed())
 						composableResource.Status.DeviceID = "GPU-device00-uuid-temp-0000-111100000000"
 						Expect(k8sClient.Status().Update(ctx, composableResource)).NotTo(HaveOccurred())
-
-						clusterPolicy := &gpuv1.ClusterPolicy{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "cluster-policy",
-							},
-							Spec: gpuv1.ClusterPolicySpec{
-								Operator: gpuv1.OperatorSpec{
-									DefaultRuntime: "docker",
-								},
-								Driver: gpuv1.DriverSpec{
-									Enabled: ptr.To(true),
-								},
-							},
-						}
-						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) || isGPUInfoFromProcCommand(url.RawQuery) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
+								} else if isGPUDrainStatusCommand(url.RawQuery) {
+									return newMockExecutor("Drain State: Not Draining", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("TARGET_FILE")) {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("/run/nvidia/driver/dev/nvidia")) {
@@ -6044,6 +5994,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								} else if strings.Contains(url.RawQuery, "command=-m&command=1") {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
+									return newMockExecutor("", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -6091,7 +6043,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						draPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
@@ -6227,31 +6180,19 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								return nil
 							},
 						)
-
-						clusterPolicy := &gpuv1.ClusterPolicy{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "cluster-policy",
-							},
-							Spec: gpuv1.ClusterPolicySpec{
-								Operator: gpuv1.OperatorSpec{
-									DefaultRuntime: "docker",
-								},
-								Driver: gpuv1.DriverSpec{
-									Enabled: ptr.To(true),
-								},
-							},
-						}
-						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) || isGPUInfoFromProcCommand(url.RawQuery) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
+								} else if isGPUDrainStatusCommand(url.RawQuery) {
+									return newMockExecutor("Drain State: Not Draining", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("TARGET_FILE")) {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("/run/nvidia/driver/dev/nvidia")) {
@@ -6261,6 +6202,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								} else if strings.Contains(url.RawQuery, "command=-m&command=1") {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
+									return newMockExecutor("", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -6413,6 +6356,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				os.Setenv("FTI_CDI_CLUSTER_ID", tc.cluster_uuid)
 
 				createComposableResource(tc.resourceName, tc.resourceSpec, tc.resourceStatus, "Attaching")
+				createNvidiaDriverDaemonset("gpu-operator")
 
 				Expect(callFunction(tc.setErrorMode)).NotTo(HaveOccurred())
 				Expect(callFunction(tc.extraHandling, tc.resourceName)).NotTo(HaveOccurred())
@@ -7105,7 +7049,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 					},
 
-					expectedReconcileError: "no Pod with label 'app.kubernetes.io/component=nvidia-driver' found on node worker-0",
+					expectedReconcileError: "nvidia-driver-daemonset pod is not found on node worker-0",
 				}),
 				Entry("should return error message when nvidia-dcgm Daemonset can not be found in cluster", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -7184,7 +7128,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						nvidiaDaemonset := &appsv1.DaemonSet{
 							ObjectMeta: metav1.ObjectMeta{
@@ -7216,6 +7161,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=gpu_uuid")) {
+									return newMockExecutor("", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -7362,7 +7309,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						draDaemonset := &appsv1.DaemonSet{
 							ObjectMeta: metav1.ObjectMeta{
@@ -7394,6 +7342,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=gpu_uuid")) {
+									return newMockExecutor("", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -7539,7 +7489,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						draDaemonset := &appsv1.DaemonSet{
 							ObjectMeta: metav1.ObjectMeta{
@@ -7572,6 +7523,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=gpu_uuid")) {
 									return newMockExecutor("", "nvidia-smi: command not found")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
 								}
@@ -7710,7 +7663,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						draDaemonset := &appsv1.DaemonSet{
 							ObjectMeta: metav1.ObjectMeta{
@@ -7743,6 +7697,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=gpu_uuid")) {
 									return newMockExecutor("GPU-device00-uuid-temp-0000-000000000000", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
 								}
@@ -7887,7 +7843,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						draDaemonset := &appsv1.DaemonSet{
 							ObjectMeta: metav1.ObjectMeta{
@@ -7920,6 +7877,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=gpu_uuid")) {
 									return newMockExecutor("GPU-device00-uuid-temp-0000-000000000000", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
 								}
@@ -8796,7 +8755,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 					cleanAllComposableResources()
 
-					Expect(k8sClient.DeleteAllOf(ctx, &gpuv1.ClusterPolicy{})).NotTo(HaveOccurred())
+					Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("gpu-operator"))).NotTo(HaveOccurred())
 
 					patches.Reset()
 				})
@@ -8834,28 +8793,17 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
-
-						clusterPolicy := &gpuv1.ClusterPolicy{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "cluster-policy",
-							},
-							Spec: gpuv1.ClusterPolicySpec{
-								Operator: gpuv1.OperatorSpec{
-									DefaultRuntime: "docker",
-								},
-								Driver: gpuv1.DriverSpec{
-									Enabled: ptr.To(true),
-								},
-							},
-						}
-						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "nvidia-smi: command not found")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
 								}
@@ -8898,28 +8846,17 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
-
-						clusterPolicy := &gpuv1.ClusterPolicy{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "cluster-policy",
-							},
-							Spec: gpuv1.ClusterPolicySpec{
-								Operator: gpuv1.OperatorSpec{
-									DefaultRuntime: "docker",
-								},
-								Driver: gpuv1.DriverSpec{
-									Enabled: ptr.To(true),
-								},
-							},
-						}
-						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("GPU-device00-uuid-temp-0000-000000000000, gpu_load_progress", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
 								}
@@ -8977,34 +8914,25 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
-
-						clusterPolicy := &gpuv1.ClusterPolicy{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "cluster-policy",
-							},
-							Spec: gpuv1.ClusterPolicySpec{
-								Operator: gpuv1.OperatorSpec{
-									DefaultRuntime: "docker",
-								},
-								Driver: gpuv1.DriverSpec{
-									Enabled: ptr.To(true),
-								},
-							},
-						}
-						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) || isGPUInfoFromProcCommand(url.RawQuery) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
+								} else if isGPUDrainStatusCommand(url.RawQuery) {
+									return newMockExecutor("Drain State: Not Draining", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("TARGET_FILE")) {
 									return newMockExecutor("nvidia-persist", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
 								}
@@ -9062,32 +8990,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
-
-						clusterPolicy := &gpuv1.ClusterPolicy{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "cluster-policy",
-							},
-							Spec: gpuv1.ClusterPolicySpec{
-								Operator: gpuv1.OperatorSpec{
-									DefaultRuntime: "docker",
-								},
-								Driver: gpuv1.DriverSpec{
-									Enabled: ptr.To(true),
-								},
-							},
-						}
-						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) || isGPUInfoFromProcCommand(url.RawQuery) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
+								} else if isGPUDrainStatusCommand(url.RawQuery) {
+									return newMockExecutor("Drain State: Not Draining", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("TARGET_FILE")) {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("/run/nvidia/driver/dev/nvidia")) {
@@ -9097,6 +9014,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								} else if strings.Contains(url.RawQuery, "command=-m&command=1") {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
+									return newMockExecutor("", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -9157,7 +9076,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						nodesToCreate := []*corev1.Node{
 							{
@@ -9211,31 +9131,19 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, secret)).To(Succeed())
-
-						clusterPolicy := &gpuv1.ClusterPolicy{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "cluster-policy",
-							},
-							Spec: gpuv1.ClusterPolicySpec{
-								Operator: gpuv1.OperatorSpec{
-									DefaultRuntime: "docker",
-								},
-								Driver: gpuv1.DriverSpec{
-									Enabled: ptr.To(true),
-								},
-							},
-						}
-						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) || isGPUInfoFromProcCommand(url.RawQuery) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
+								} else if isGPUDrainStatusCommand(url.RawQuery) {
+									return newMockExecutor("Drain State: Not Draining", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("TARGET_FILE")) {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("/run/nvidia/driver/dev/nvidia")) {
@@ -9245,6 +9153,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								} else if strings.Contains(url.RawQuery, "command=-m&command=1") {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
+									return newMockExecutor("", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -9292,7 +9202,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						if k8serrors.IsNotFound(err) {
 							node = &corev1.Node{
@@ -9350,31 +9261,19 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, secret)).To(Succeed())
-
-						clusterPolicy := &gpuv1.ClusterPolicy{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "cluster-policy",
-							},
-							Spec: gpuv1.ClusterPolicySpec{
-								Operator: gpuv1.OperatorSpec{
-									DefaultRuntime: "docker",
-								},
-								Driver: gpuv1.DriverSpec{
-									Enabled: ptr.To(true),
-								},
-							},
-						}
-						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) || isGPUInfoFromProcCommand(url.RawQuery) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
+								} else if isGPUDrainStatusCommand(url.RawQuery) {
+									return newMockExecutor("Drain State: Not Draining", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("TARGET_FILE")) {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("/run/nvidia/driver/dev/nvidia")) {
@@ -9384,6 +9283,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								} else if strings.Contains(url.RawQuery, "command=-m&command=1") {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
+									return newMockExecutor("", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -9431,7 +9332,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						nodesToCreate := []*corev1.Node{
 							{
@@ -9503,31 +9405,19 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						Expect(k8sClient.Create(ctx, composableResource)).To(Succeed())
 						composableResource.Status.DeviceID = "GPU-device00-uuid-temp-0000-111100000000"
 						Expect(k8sClient.Status().Update(ctx, composableResource)).NotTo(HaveOccurred())
-
-						clusterPolicy := &gpuv1.ClusterPolicy{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "cluster-policy",
-							},
-							Spec: gpuv1.ClusterPolicySpec{
-								Operator: gpuv1.OperatorSpec{
-									DefaultRuntime: "docker",
-								},
-								Driver: gpuv1.DriverSpec{
-									Enabled: ptr.To(true),
-								},
-							},
-						}
-						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) || isGPUInfoFromProcCommand(url.RawQuery) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
+								} else if isGPUDrainStatusCommand(url.RawQuery) {
+									return newMockExecutor("Drain State: Not Draining", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("TARGET_FILE")) {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("/run/nvidia/driver/dev/nvidia")) {
@@ -9537,6 +9427,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								} else if strings.Contains(url.RawQuery, "command=-m&command=1") {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
+									return newMockExecutor("", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -9583,7 +9475,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						nodesToCreate := []*corev1.Node{
 							{
@@ -9681,31 +9574,19 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						Expect(k8sClient.Create(ctx, composableResource)).To(Succeed())
 						composableResource.Status.DeviceID = "GPU-device00-uuid-temp-0000-111100000000"
 						Expect(k8sClient.Status().Update(ctx, composableResource)).NotTo(HaveOccurred())
-
-						clusterPolicy := &gpuv1.ClusterPolicy{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "cluster-policy",
-							},
-							Spec: gpuv1.ClusterPolicySpec{
-								Operator: gpuv1.OperatorSpec{
-									DefaultRuntime: "docker",
-								},
-								Driver: gpuv1.DriverSpec{
-									Enabled: ptr.To(true),
-								},
-							},
-						}
-						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) || isGPUInfoFromProcCommand(url.RawQuery) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
+								} else if isGPUDrainStatusCommand(url.RawQuery) {
+									return newMockExecutor("Drain State: Not Draining", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("TARGET_FILE")) {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("/run/nvidia/driver/dev/nvidia")) {
@@ -9715,6 +9596,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								} else if strings.Contains(url.RawQuery, "command=-m&command=1") {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
+									return newMockExecutor("", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -9762,7 +9645,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								},
 							},
 						}
-						Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+						mustCreateReadyPod(nvidiaPod)
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						nodesToCreate := []*corev1.Node{
 							{
@@ -9868,33 +9752,21 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						}
 						Expect(k8sClient.Create(ctx, dcgmDaemonset)).NotTo(HaveOccurred())
-
-						clusterPolicy := &gpuv1.ClusterPolicy{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: "cluster-policy",
-							},
-							Spec: gpuv1.ClusterPolicySpec{
-								Operator: gpuv1.OperatorSpec{
-									DefaultRuntime: "docker",
-								},
-								Driver: gpuv1.DriverSpec{
-									Enabled: ptr.To(true),
-								},
-							},
-						}
-						Expect(k8sClient.Create(ctx, clusterPolicy)).NotTo(HaveOccurred())
+						createNvidiaDriverDaemonset("gpu-operator")
 
 						patches.ApplyFunc(
 							remotecommand.NewSPDYExecutor,
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) || isGPUInfoFromProcCommand(url.RawQuery) {
 									return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=gpu_uuid")) {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 									return newMockExecutor("", "")
+								} else if isGPUDrainStatusCommand(url.RawQuery) {
+									return newMockExecutor("Drain State: Not Draining", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("TARGET_FILE")) {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("/run/nvidia/driver/dev/nvidia")) {
@@ -9904,6 +9776,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								} else if strings.Contains(url.RawQuery, "command=-m&command=1") {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
+									return newMockExecutor("", "")
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -10179,7 +10053,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						},
 					}
-					Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+					mustCreateReadyPod(nvidiaPod)
+					createNvidiaDriverDaemonset("gpu-operator")
 
 					draDaemonset := &appsv1.DaemonSet{
 						ObjectMeta: metav1.ObjectMeta{
@@ -10215,6 +10090,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 							if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=gpu_uuid")) {
 								return newMockExecutor("GPU-device00-uuid-temp-0000-000000000000", "")
+							} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								return newMockExecutor("", "")
 							} else {
 								return newMockExecutor("", "this error should be reported")
 							}
@@ -10257,7 +10134,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							},
 						},
 					}
-					Expect(k8sClient.Create(ctx, nvidiaPod)).NotTo(HaveOccurred())
+					mustCreateReadyPod(nvidiaPod)
+					createNvidiaDriverDaemonset("gpu-operator")
 
 					draPod := &corev1.Pod{
 						ObjectMeta: metav1.ObjectMeta{
@@ -10346,7 +10224,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 							if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 								return newMockExecutor("", "")
-							} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) {
+							} else if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=device_minor,gpu_uuid,pci.bus_id")) || isGPUInfoFromProcCommand(url.RawQuery) {
 								return newMockExecutor("0, GPU-device00-uuid-temp-0000-000000000000, 00000000:1F:00.0", "")
 							} else if strings.Contains(url.RawQuery, "command=-pm&command=0") {
 								return newMockExecutor("", "")
@@ -10359,6 +10237,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							} else if strings.Contains(url.RawQuery, "command=-m&command=1") {
 								return newMockExecutor("", "")
 							} else if strings.Contains(url.RawQuery, "command=-r") {
+								return newMockExecutor("", "")
+							} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
 								return newMockExecutor("", "")
 							} else {
 								return newMockExecutor("", "this error should be reported")

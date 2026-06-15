@@ -63,7 +63,6 @@ var composableResourceLog = ctrl.Log.WithName("composable_resource_controller")
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get,resourceNames=credentials
 // +kubebuilder:rbac:groups=resource.k8s.io,resources=resourceslices,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=resource.k8s.io,resources=resourceslices/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=nvidia.com,resources=clusterpolicies,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -213,6 +212,10 @@ func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context,
 	}
 
 	deviceResourceType := os.Getenv("DEVICE_RESOURCE_TYPE")
+
+	if err := utils.EnsureGPUDriverExists(ctx, r.Client, r.Clientset, r.RestConfig, resource.Spec.TargetNode); err != nil {
+		return r.requeueOnErr(resource, err, "failed to ensure nvidia driver exists on target node", "TargetNode", resource.Spec.TargetNode, "composableResource", resource.Name)
+	}
 
 	if resource.Status.DeviceID == "" {
 		deviceID, CDIDeviceID, err := adapter.CDIProvider.AddResource(resource)

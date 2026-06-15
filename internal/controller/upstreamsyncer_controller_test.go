@@ -167,6 +167,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 			reconciler = &UpstreamSyncerReconciler{
 				Client:         k8sClient,
 				ClientSet:      clientSet,
+				RestConfig:     cfg,
 				Scheme:         scheme.Scheme,
 				missingDevices: make(map[string]time.Time),
 			}
@@ -241,6 +242,14 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 				Expect(k8sClient.DeleteAllOf(ctx, &corev1.Secret{}, client.InNamespace("composable-resource-operator-system"))).NotTo(HaveOccurred())
 
 				Expect(k8sClient.DeleteAllOf(ctx, &corev1.Pod{},
+					client.InNamespace("gpu-operator"),
+					&client.DeleteAllOfOptions{
+						DeleteOptions: client.DeleteOptions{
+							GracePeriodSeconds: ptr.To(int64(0)),
+						},
+					},
+				)).NotTo(HaveOccurred())
+				Expect(k8sClient.DeleteAllOf(ctx, &corev1.Pod{},
 					client.InNamespace("nvidia-gpu-operator"),
 					&client.DeleteAllOfOptions{
 						DeleteOptions: client.DeleteOptions{
@@ -257,6 +266,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 					},
 				)).NotTo(HaveOccurred())
 
+				Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("gpu-operator"))).NotTo(HaveOccurred())
 				Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("nvidia-dra-driver-gpu"))).NotTo(HaveOccurred())
 
 				Expect(k8sClient.DeleteAllOf(ctx, &resourcev1.ResourceSlice{})).NotTo(HaveOccurred())
@@ -483,6 +493,71 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 				isCreated: true,
 
 				extraHandling: func() {
+					createNvidiaDriverDaemonset("gpu-operator")
+
+					nodesToCreate := []*corev1.Node{
+						{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: baseComposableResource.Spec.TargetNode,
+								Annotations: map[string]string{
+									"machine.openshift.io/machine": "openshift-machine-api/machine-worker-0",
+								},
+							},
+						},
+					}
+					for _, node := range nodesToCreate {
+						Expect(k8sClient.Create(ctx, node)).To(Succeed())
+					}
+
+					machine0 := &machinev1beta1.Metal3Machine{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "machine-worker-0",
+							Namespace: "openshift-machine-api",
+							Annotations: map[string]string{
+								"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
+							},
+						},
+					}
+					Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
+
+					bmh0 := &metal3v1alpha1.BareMetalHost{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "bmh-worker-0",
+							Namespace: "openshift-machine-api",
+							Annotations: map[string]string{
+								"cluster-manager.cdi.io/machine": "machine0-uuid-temp-0000-000000000000",
+							},
+						},
+					}
+					Expect(k8sClient.Create(ctx, bmh0)).To(Succeed())
+
+					secret := &corev1.Secret{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "credentials",
+							Namespace: "composable-resource-operator-system",
+						},
+						Type: corev1.SecretTypeOpaque,
+						Data: map[string][]byte{
+							"username":      []byte("good_user"),
+							"password":      []byte("test_password"),
+							"client_id":     []byte("test_client_id"),
+							"client_secret": []byte("test_client_secret"),
+							"realm":         []byte("test_realm"),
+						},
+					}
+					Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+				},
+			}),
+			Entry("should not create a ComposableResource for detaching when no nvidia driver exists on target node even after grace period", testcase{
+				tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
+				cluster_uuid: "cluster0-uuid-temp-0000-000000000000",
+
+				missingDevicesTime: map[string]time.Time{
+					"GPU-device00-uuid-temp-0000-000000000000": time.Now().Add(-20 * time.Minute),
+				},
+				isCreated: false,
+
+				extraHandling: func() {
 					nodesToCreate := []*corev1.Node{
 						{
 							ObjectMeta: metav1.ObjectMeta{
@@ -557,10 +632,13 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 			k8sClient.MockGet = nil
 			k8sClient.MockUpdate = nil
 			k8sClient.MockStatusUpdate = nil
+			Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("gpu-operator"))).NotTo(HaveOccurred())
 			cleanAllComposableResources()
 		})
 
 		It("should successfully create a detach ComposableResource", func() {
+			createNvidiaDriverDaemonset("gpu-operator")
+
 			deviceInfo := cdi.DeviceInfo{
 				DeviceID:    "GPU-device00-uuid-temp-0000-000000000000",
 				CDIDeviceID: "GPU-device00-uuid-temp-0000-000000000res",
@@ -586,6 +664,8 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 		})
 
 		It("should return error when creating detach ComposableResource fails", func() {
+			createNvidiaDriverDaemonset("gpu-operator")
+
 			k8sClient.MockCreate = func(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
 				return errors.New("create composable resource fails")
 			}
@@ -634,6 +714,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 			k8sClient.MockGet = nil
 			k8sClient.MockUpdate = nil
 			k8sClient.MockStatusUpdate = nil
+			Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("gpu-operator"))).NotTo(HaveOccurred())
 			cleanAllComposableResources()
 		})
 
@@ -743,6 +824,8 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 		})
 
 		It("should keep tracking device when grace period is exceeded but createDetachCR fails", func() {
+			createNvidiaDriverDaemonset("gpu-operator")
+
 			deviceID := "GPU-device00-uuid-temp-0000-000000000000"
 			reconciler.missingDevices[deviceID] = time.Now().Add(-20 * time.Minute)
 
@@ -781,6 +864,8 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 		})
 
 		It("should create detach CR and remove device from tracking when grace period is exceeded", func() {
+			createNvidiaDriverDaemonset("gpu-operator")
+
 			deviceID := "GPU-device00-uuid-temp-0000-000000000000"
 			reconciler.missingDevices[deviceID] = time.Now().Add(-20 * time.Minute)
 

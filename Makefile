@@ -119,7 +119,6 @@ vet: ## Run go vet against code.
 download-test-crds: ## Download external CRD modules required by envtest
 	go mod download github.com/metal3-io/cluster-api-provider-metal3@v1.9.3
 	go mod download github.com/metal3-io/baremetal-operator@v0.9.1
-	go mod download github.com/NVIDIA/gpu-operator@v1.11.1
 
 .PHONY: test
 test: manifests generate fmt vet envtest download-test-crds ## Run tests.

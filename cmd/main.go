@@ -24,7 +24,6 @@ import (
 
 	// Import all Kubernetes client auth plugins (e.g. Azure, GCP, OIDC, etc.)
 	// to ensure that exec-entrypoint and run can make use of them.
-	gpuv1 "github.com/NVIDIA/gpu-operator/api/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -52,7 +51,6 @@ func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 
 	utilruntime.Must(crov1alpha1.AddToScheme(scheme))
-	utilruntime.Must(gpuv1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 
@@ -182,9 +180,10 @@ func main() {
 	}
 
 	if err = (&controller.UpstreamSyncerReconciler{
-		Client:    mgr.GetClient(),
-		ClientSet: clientset,
-		Scheme:    mgr.GetScheme(),
+		Client:     mgr.GetClient(),
+		ClientSet:  clientset,
+		RestConfig: mgr.GetConfig(),
+		Scheme:     mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "UpstreamSyncer")
 		os.Exit(1)
