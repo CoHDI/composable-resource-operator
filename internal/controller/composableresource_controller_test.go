@@ -2749,7 +2749,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						return composableResourceStatus
 					}(),
 				}),
-				Entry("should return error message when nvidia-dra-driver-gpu-kubelet-plugin Daemonset can not be found in cluster", testcase{
+				Entry("should wait when nvidia-dra-driver-gpu-kubelet-plugin Daemonset can not be found in cluster", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
 					cluster_uuid: "cluster0-uuid-temp-0000-000000000001",
 
@@ -2856,7 +2856,6 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					expectedRequestStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.State = "Attaching"
-						composableResourceStatus.Error = "daemonsets.apps \"nvidia-dra-driver-gpu-kubelet-plugin\" not found"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
 						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
@@ -3269,7 +3268,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						return composableResourceStatus
 					}(),
 				}),
-				Entry("should return error message when the added gpu has not been recognized by cluster because annoation restartedAt can not be parsed", testcase{
+				Entry("should wait when the added gpu has not been recognized by cluster and annoation restartedAt can not be parsed", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
 					cluster_uuid: "cluster0-uuid-temp-0000-000000000001",
 
@@ -3403,7 +3402,6 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					expectedRequestStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.State = "Attaching"
-						composableResourceStatus.Error = "failed to parse restartedAt annotation for DaemonSet nvidia-dra-driver-gpu/nvidia-dra-driver-gpu-kubelet-plugin: 'parsing time \"error\" as \"2006-01-02T15:04:05Z07:00\": cannot parse \"error\" as \"2006\"'"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
 						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
@@ -5816,7 +5814,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						return composableResourceStatus
 					}(),
 				}),
-				Entry("should fail when detaching because the target node is missing machine annotation", testcase{
+				Entry("should wait when detaching and ResourceSlice is still visible", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
 					cluster_uuid: "cluster0-uuid-temp-0000-000000000000",
 
@@ -6004,7 +6002,13 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						)
 					},
 
-					expectedReconcileError: "daemonsets.apps \"nvidia-dra-driver-gpu-kubelet-plugin\" not found",
+					expectedRequestStatus: func() *crov1alpha1.ComposableResourceStatus {
+						composableResourceStatus := baseComposableResource.Status.DeepCopy()
+						composableResourceStatus.State = "Detaching"
+						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
+						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
+						return composableResourceStatus
+					}(),
 				}),
 				Entry("should successfully enter Deleting state when the GPU has been removed from the upstream server", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -6167,11 +6171,11 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						Expect(k8sClient.Create(ctx, resourceSlice)).NotTo(HaveOccurred())
 
-						// Patch RestartDaemonset to update ResourceSlice (remove GPU)
+						// Patch TerminateKubeletPluginPodOnNode to update ResourceSlice (remove GPU)
 						patches.ApplyFunc(
-							utils.RestartDaemonset,
-							func(ctx context.Context, client client.Client, namespace, name string) error {
-								// When DaemonSet is restarted, update ResourceSlice to remove the GPU
+							utils.TerminateKubeletPluginPodOnNode,
+							func(ctx context.Context, clientset *kubernetes.Clientset, targetNodeName string) error {
+								// When kubelet plugin pod is terminated, update ResourceSlice to remove the GPU
 								rs := &resourcev1.ResourceSlice{}
 								if err := k8sClient.Get(ctx, types.NamespacedName{Name: "resourceslice-test"}, rs); err == nil {
 									rs.Spec.Devices = []resourcev1.Device{} // Remove GPU

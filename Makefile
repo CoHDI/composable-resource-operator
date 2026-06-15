@@ -115,11 +115,6 @@ fmt: ## Run go fmt against code.
 vet: ## Run go vet against code.
 	go vet ./...
 
-.PHONY: download-test-crds
-download-test-crds: ## Download external CRD modules required by envtest
-	go mod download github.com/metal3-io/cluster-api-provider-metal3@v1.9.3
-	go mod download github.com/metal3-io/baremetal-operator@v0.9.1
-
 .PHONY: test
 test: manifests generate fmt vet envtest download-test-crds ## Run tests.
 	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out

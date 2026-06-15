@@ -963,6 +963,45 @@ func getNvidiaDriverDaemonsetPod(ctx context.Context, c client.Client, targetNod
 	return nil, fmt.Errorf("nvidia-driver-daemonset pod is not running on node %s", targetNodeName)
 }
 
+func getDRAKubeletPluginPod(ctx context.Context, clientset *kubernetes.Clientset, targetNodeName string) (*corev1.Pod, error) {
+	pods, err := clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{
+		LabelSelector: fmt.Sprintf("app.kubernetes.io/name=nvidia-dra-driver-gpu"),
+		FieldSelector: fmt.Sprintf("spec.nodeName=%s", targetNodeName),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to list pods: %v", err)
+	}
+
+	for _, pod := range pods.Items {
+		if strings.HasPrefix(pod.Name, "nvidia-dra-driver-gpu-kubelet-plugin") {
+			return &pod, nil
+		}
+	}
+
+	return nil, nil
+}
+
+func TerminateKubeletPluginPodOnNode(ctx context.Context, clientset *kubernetes.Clientset, targetNodeName string) error {
+	gpusLog.Info("start terminate kubelet pod ", "target_node_name", targetNodeName)
+	draPod, err := getDRAKubeletPluginPod(ctx, clientset, targetNodeName)
+
+	if err != nil {
+		return err
+	}
+
+	if draPod == nil {
+		gpusLog.Info("skip terminate because nvidia-dra-driver-gpu-kubelet-plugin not found")
+		return nil
+	}
+
+	if time.Since(draPod.CreationTimestamp.Time) <= 10*time.Second {
+		gpusLog.Info("skip terminate because nvidia-dra-driver-gpu-kubelet-plugin already terminated recently")
+		return nil
+	}
+
+	return clientset.CoreV1().Pods(draPod.Namespace).Delete(ctx, draPod.Name, metav1.DeleteOptions{})
+}
+
 func getCroNodeAgentPod(ctx context.Context, clientset *kubernetes.Clientset, targetNodeName string) (*corev1.Pod, error) {
 	pods, err := clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{
 		LabelSelector: fmt.Sprintf("app=cro-node-agent"),
