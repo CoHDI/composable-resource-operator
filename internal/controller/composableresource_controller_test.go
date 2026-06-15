@@ -4646,7 +4646,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						)
 					},
 
-					expectedReconcileError: "found gpu loads on node 'worker-0': '[GPUUUID: 'GPU-device00-uuid-temp-0000-000000000000', ProcessName: 'gpu_load_progress']'",
+					expectedReconcileError: "found gpu load on gpu 'GPU-device00-uuid-temp-0000-000000000000': [GPUUUID: 'GPU-device00-uuid-temp-0000-000000000000', ProcessName: 'gpu_load_progress']",
 				}),
 				Entry("should fail when draining gpu because the nvidiaX file is being occupied", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -8868,7 +8868,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						)
 					},
 
-					expectedReconcileError: "found gpu loads on node 'worker-0': '[GPUUUID: 'GPU-device00-uuid-temp-0000-000000000000', ProcessName: 'gpu_load_progress']'",
+					expectedReconcileError: "found gpu load on gpu 'GPU-device00-uuid-temp-0000-000000000000': [GPUUUID: 'GPU-device00-uuid-temp-0000-000000000000', ProcessName: 'gpu_load_progress']",
 				}),
 				Entry("should fail when draining gpu because the nvidiaX file is being occupied", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",

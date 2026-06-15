@@ -188,46 +188,47 @@ func CheckNoGPULoads(ctx context.Context, c client.Client, clientset *kubernetes
 			return err
 		}
 
-		// Get information from /proc about the GPU to be drained.
-		gpuInfosForProc, err := getGPUInfoFromProc(
-			ctx,
-			clientset,
-			restConfig,
-			pod,
-			targetNodeName,
-			"gpu_uuid",
-			"/bin/chroot",
-			"/host-root",
-			"no GPUs detected via /proc scan",
-			"Successfully got GPU info from DRA pod",
-		)
-		if err != nil {
-			return err
-		}
-		foundGPU := false
-		for _, gpuInfo := range gpuInfosForProc {
-			if gpuInfo["gpu_uuid"] == *targetGPUUUID {
-				foundGPU = true
-				break
+		if targetGPUUUID != nil {
+			// Get information from /proc about the GPU to be drained.
+			gpuInfosForProc, err := getGPUInfoFromProc(
+				ctx,
+				clientset,
+				restConfig,
+				pod,
+				targetNodeName,
+				"gpu_uuid",
+				"/bin/chroot",
+				"/host-root",
+				"no GPUs detected via /proc scan",
+				"Successfully got GPU info from DRA pod",
+			)
+			if err != nil {
+				return err
 			}
-		}
-		if !foundGPU {
-			gpusLog.Info("target GPU UUID was not found in the list of GPUs under /proc. It has already been reset, so there is no load, skip it", "targetNodeName", targetNodeName, "targetGPUUUID", *targetGPUUUID)
-			return nil
+			foundGPU := false
+			for _, gpuInfo := range gpuInfosForProc {
+				if gpuInfo["gpu_uuid"] == *targetGPUUUID {
+					foundGPU = true
+					break
+				}
+			}
+			if !foundGPU {
+				gpusLog.Info("target GPU UUID was not found in the list of GPUs under /proc. It has already been reset, so there is no load, skip it", "targetNodeName", targetNodeName, "targetGPUUUID", *targetGPUUUID)
+				return nil
+			}
 		}
 
 		command = []string{"/bin/chroot", "/host-root", "/usr/bin/nvidia-smi", "--query-compute-apps=gpu_uuid,process_name", "--format=csv,noheader,nounits"}
 	case GPUDriverTypeContainer:
 		pod, err = getNvidiaDriverDaemonsetPod(ctx, c, targetNodeName)
 		if err != nil {
-			if strings.Contains(err.Error(), "not ready") {
-				return err
+			if strings.Contains(err.Error(), "nvidia-driver-daemonset pod is not found") {
+				gpusLog.Info("nvidia-driver-daemonset Pod is not found, it means that there is no GPU on the node, so there is no load, skip it", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
+				return nil
 			}
-			// If the nvidia-driver-daemonset Pod is not found, it means that there is no GPU on the node, so there is no load.
-			gpusLog.Info("nvidia-driver-daemonset Pod is not found, it means that there is no GPU on the node, so there is no load, skip it", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
-			return nil
+			return err
 		}
-
+		
 		command = []string{"/usr/bin/nvidia-smi", "--query-compute-apps=gpu_uuid,process_name", "--format=csv,noheader,nounits"}
 	default:
 		gpusLog.Info("no nvidia driver found on node, so there is no gpu load to check, skip it", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
@@ -268,19 +269,12 @@ func CheckNoGPULoads(ctx context.Context, c client.Client, clientset *kubernetes
 		accountedApps = append(accountedApps, appInfo)
 	}
 
-	if driverType == GPUDriverTypeHost {
-		for _, appInfo := range accountedApps {
-			if appInfo.GPUUUID == *targetGPUUUID {
-				return fmt.Errorf("found gpu load on gpu '%s': %v", *targetGPUUUID, accountedApps)
-			}
+	for _, appInfo := range accountedApps {
+		if targetGPUUUID == nil || appInfo.GPUUUID == *targetGPUUUID {
+			return fmt.Errorf("found gpu load on gpu '%s': %v", appInfo.GPUUUID, accountedApps)
 		}
-		gpusLog.Info("no gpu loads found in cro-node-agent Pod", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
-	} else {
-		if len(accountedApps) > 0 {
-			return fmt.Errorf("found gpu loads on node '%s': '%v'", targetNodeName, accountedApps)
-		}
-		gpusLog.Info("no gpu loads found in nvidia-driver-daemonset Pod", "targetNodeName", targetNodeName)
 	}
+	gpusLog.Info("no gpu loads found", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID, "driverType", driverType)
 
 	return nil
 }
@@ -503,11 +497,23 @@ fi
 			// OCP (K8S) + DRA
 			nvidiaPod, err := getNvidiaDriverDaemonsetPod(ctx, c, targetNodeName)
 			if err != nil {
-				if strings.Contains(err.Error(), "not ready") {
+				if !strings.Contains(err.Error(), "nvidia-driver-daemonset pod is not found") {
 					return err
 				}
-				gpusLog.Info("nvidia-driver-daemonset Pod is not found, it means that there is no GPU on the node, so no need to drain, skip it", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
-				return nil
+
+				// If the nvidia-driver-daemonset Pod is not found and GPU labels are gone from the target node, the GPU has already been drained.
+				checkNodeLabels, checkNodeLabelsErr := clientset.CoreV1().Nodes().Get(ctx, targetNodeName, metav1.GetOptions{})
+				if checkNodeLabelsErr != nil {
+					return checkNodeLabelsErr
+				}
+				hasPciLabel := checkNodeLabels.Labels["feature.node.kubernetes.io/pci-10de.present"] == "true"
+				hasGpuLabel := checkNodeLabels.Labels["nvidia.com/gpu.present"] == "true"
+				if !hasPciLabel && !hasGpuLabel {
+					gpusLog.Info("GPU labels not present or 'false' on the target node (feature.node.kubernetes.io/pci-10de.present=true and nvidia.com/gpu.present=true not found). Drain is not required; skipping.", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
+					return nil
+				}
+
+				return err
 			}
 			if err := killNvidiaPersistencedInDriverPod(ctx, clientset, restConfig, nvidiaPod); err != nil {
 				return err
