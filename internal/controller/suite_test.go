@@ -87,6 +87,8 @@ func (m *myStatusWriter) Update(ctx context.Context, obj client.Object, opts ...
 type MyClient struct {
 	client.Client
 	MockGet          func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error
+	MockCreate       func(ctx context.Context, obj client.Object, opts ...client.CreateOption) error
+	MockList         func(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error
 	MockUpdate       func(ctx context.Context, obj client.Object, opts ...client.UpdateOption) error
 	MockStatusUpdate func(originalUpdate func(client.Object, ...client.SubResourceUpdateOption) error, ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error
 }
@@ -96,6 +98,20 @@ func (m *MyClient) Get(ctx context.Context, key client.ObjectKey, obj client.Obj
 		return m.MockGet(ctx, key, obj, opts...)
 	}
 	return m.Client.Get(ctx, key, obj, opts...)
+}
+
+func (m *MyClient) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
+	if m.MockCreate != nil {
+		return m.MockCreate(ctx, obj, opts...)
+	}
+	return m.Client.Create(ctx, obj, opts...)
+}
+
+func (m *MyClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	if m.MockList != nil {
+		return m.MockList(ctx, list, opts...)
+	}
+	return m.Client.List(ctx, list, opts...)
 }
 
 func (m *MyClient) Update(ctx context.Context, obj client.Object, opts ...client.UpdateOption) error {

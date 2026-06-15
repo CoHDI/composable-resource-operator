@@ -17,8 +17,10 @@
 package controller
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -26,6 +28,7 @@ import (
 	"time"
 
 	crov1alpha1 "github.com/CoHDI/composable-resource-operator/api/v1alpha1"
+	"github.com/CoHDI/composable-resource-operator/internal/cdi"
 	"github.com/agiledragon/gomonkey/v2"
 	metal3v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	machinev1beta1 "github.com/metal3-io/cluster-api-provider-metal3/api/v1beta1"
@@ -41,6 +44,26 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+type fakeCdiProvider struct {
+	getResourcesFunc func() ([]cdi.DeviceInfo, error)
+}
+
+func (f *fakeCdiProvider) AddResource(instance *crov1alpha1.ComposableResource) (string, string, error) {
+	panic("not used in upstream syncer tests")
+}
+
+func (f *fakeCdiProvider) RemoveResource(instance *crov1alpha1.ComposableResource) error {
+	panic("not used in upstream syncer tests")
+}
+
+func (f *fakeCdiProvider) CheckResource(instance *crov1alpha1.ComposableResource) error {
+	panic("not used in upstream syncer tests")
+}
+
+func (f *fakeCdiProvider) GetResources() ([]cdi.DeviceInfo, error) {
+	return f.getResourcesFunc()
+}
 
 var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 	BeforeAll(func() {
@@ -206,6 +229,9 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 				os.Unsetenv("FTI_CDI_TENANT_ID")
 				os.Unsetenv("FTI_CDI_CLUSTER_ID")
 
+				k8sClient.MockGet = nil
+				k8sClient.MockCreate = nil
+				k8sClient.MockList = nil
 				k8sClient.MockUpdate = nil
 				k8sClient.MockStatusUpdate = nil
 
@@ -511,5 +537,275 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 				},
 			}),
 		)
+	})
+
+	Describe("When createDetachCR is triggered", func() {
+		var reconciler *UpstreamSyncerReconciler
+
+		BeforeEach(func() {
+			reconciler = &UpstreamSyncerReconciler{
+				Client:         k8sClient,
+				ClientSet:      nil,
+				Scheme:         scheme.Scheme,
+				missingDevices: make(map[string]time.Time),
+			}
+		})
+
+		AfterEach(func() {
+			k8sClient.MockCreate = nil
+			k8sClient.MockList = nil
+			k8sClient.MockGet = nil
+			k8sClient.MockUpdate = nil
+			k8sClient.MockStatusUpdate = nil
+			cleanAllComposableResources()
+		})
+
+		It("should successfully create a detach ComposableResource", func() {
+			deviceInfo := cdi.DeviceInfo{
+				DeviceID:    "GPU-device00-uuid-temp-0000-000000000000",
+				CDIDeviceID: "GPU-device00-uuid-temp-0000-000000000res",
+				DeviceType:  "gpu",
+				Model:       "NVIDIA-A100-PCIE-80GB",
+				NodeName:    worker0Name,
+			}
+
+			err := reconciler.createDetachCR(ctx, deviceInfo)
+			Expect(err).NotTo(HaveOccurred())
+
+			composableResourceList := &crov1alpha1.ComposableResourceList{}
+			Expect(k8sClient.List(ctx, composableResourceList)).To(Succeed())
+			Expect(composableResourceList.Items).To(HaveLen(1))
+
+			created := composableResourceList.Items[0]
+			Expect(created.Labels["cohdi.io/ready-to-detach-device-id"]).To(Equal(deviceInfo.DeviceID))
+			Expect(created.Labels["cohdi.io/ready-to-detach-cdi-device-id"]).To(Equal(deviceInfo.CDIDeviceID))
+			Expect(created.Spec.Type).To(Equal(deviceInfo.DeviceType))
+			Expect(created.Spec.Model).To(Equal(deviceInfo.Model))
+			Expect(created.Spec.TargetNode).To(Equal(deviceInfo.NodeName))
+			Expect(created.Spec.ForceDetach).To(BeFalse())
+		})
+
+		It("should return error when creating detach ComposableResource fails", func() {
+			k8sClient.MockCreate = func(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
+				return errors.New("create composable resource fails")
+			}
+
+			deviceInfo := cdi.DeviceInfo{
+				DeviceID:    "GPU-device00-uuid-temp-0000-000000000000",
+				CDIDeviceID: "GPU-device00-uuid-temp-0000-000000000res",
+				DeviceType:  "gpu",
+				Model:       "NVIDIA-A100-PCIE-80GB",
+				NodeName:    worker0Name,
+			}
+
+			err := reconciler.createDetachCR(ctx, deviceInfo)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(Equal("create composable resource fails"))
+		})
+	})
+
+	Describe("When syncUpstreamData is triggered directly", func() {
+		var reconciler *UpstreamSyncerReconciler
+
+		newAdapter := func(resources []cdi.DeviceInfo, err error) *ComposableResourceAdapter {
+			return &ComposableResourceAdapter{
+				client:    k8sClient,
+				clientSet: nil,
+				CDIProvider: &fakeCdiProvider{
+					getResourcesFunc: func() ([]cdi.DeviceInfo, error) {
+						return resources, err
+					},
+				},
+			}
+		}
+
+		BeforeEach(func() {
+			reconciler = &UpstreamSyncerReconciler{
+				Client:         k8sClient,
+				ClientSet:      nil,
+				Scheme:         scheme.Scheme,
+				missingDevices: make(map[string]time.Time),
+			}
+		})
+
+		AfterEach(func() {
+			k8sClient.MockCreate = nil
+			k8sClient.MockList = nil
+			k8sClient.MockGet = nil
+			k8sClient.MockUpdate = nil
+			k8sClient.MockStatusUpdate = nil
+			cleanAllComposableResources()
+		})
+
+		It("should return error when fetching data from upstream server fails", func() {
+			adapter := newAdapter(nil, errors.New("upstream fetch failed"))
+
+			err := reconciler.syncUpstreamData(ctx, adapter)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(Equal("failed to fetch data from upstream server: upstream fetch failed"))
+		})
+
+		It("should return error when listing ComposableResources fails", func() {
+			k8sClient.MockList = func(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+				if _, ok := list.(*crov1alpha1.ComposableResourceList); ok {
+					return errors.New("list composable resources fails")
+				}
+				return k8sClient.Client.List(ctx, list, opts...)
+			}
+
+			adapter := newAdapter([]cdi.DeviceInfo{
+				{
+					DeviceID:    "GPU-device00-uuid-temp-0000-000000000000",
+					CDIDeviceID: "GPU-device00-uuid-temp-0000-000000000res",
+					DeviceType:  "gpu",
+					Model:       "NVIDIA-A100-PCIE-80GB",
+					NodeName:    worker0Name,
+				},
+			}, nil)
+
+			err := reconciler.syncUpstreamData(ctx, adapter)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(Equal("failed to list ComposableResources: list composable resources fails"))
+		})
+
+		It("should start tracking a missing upstream device", func() {
+			deviceID := "GPU-device00-uuid-temp-0000-000000000000"
+			adapter := newAdapter([]cdi.DeviceInfo{
+				{
+					DeviceID:    deviceID,
+					CDIDeviceID: "GPU-device00-uuid-temp-0000-000000000res",
+					DeviceType:  "gpu",
+					Model:       "NVIDIA-A100-PCIE-80GB",
+					NodeName:    worker0Name,
+				},
+			}, nil)
+
+			err := reconciler.syncUpstreamData(ctx, adapter)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, tracked := reconciler.missingDevices[deviceID]
+			Expect(tracked).To(BeTrue())
+		})
+
+		It("should remove device from tracking when a local ComposableResource already exists", func() {
+			deviceID := "GPU-device00-uuid-temp-0000-000000000000"
+			reconciler.missingDevices[deviceID] = time.Now().Add(-20 * time.Minute)
+
+			createComposableResource(
+				"existing-local-resource",
+				baseComposableResource.Spec.DeepCopy(),
+				func() *crov1alpha1.ComposableResourceStatus {
+					status := baseComposableResource.Status.DeepCopy()
+					status.DeviceID = deviceID
+					return status
+				}(),
+				"Online",
+			)
+
+			adapter := newAdapter([]cdi.DeviceInfo{
+				{
+					DeviceID:    deviceID,
+					CDIDeviceID: "GPU-device00-uuid-temp-0000-000000000res",
+					DeviceType:  "gpu",
+					Model:       "NVIDIA-A100-PCIE-80GB",
+					NodeName:    worker0Name,
+				},
+			}, nil)
+
+			err := reconciler.syncUpstreamData(ctx, adapter)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, tracked := reconciler.missingDevices[deviceID]
+			Expect(tracked).To(BeFalse())
+		})
+
+		It("should keep tracking device when it is still within grace period", func() {
+			deviceID := "GPU-device00-uuid-temp-0000-000000000000"
+			firstSeen := time.Now().Add(-1 * time.Minute)
+			reconciler.missingDevices[deviceID] = firstSeen
+
+			adapter := newAdapter([]cdi.DeviceInfo{
+				{
+					DeviceID:    deviceID,
+					CDIDeviceID: "GPU-device00-uuid-temp-0000-000000000res",
+					DeviceType:  "gpu",
+					Model:       "NVIDIA-A100-PCIE-80GB",
+					NodeName:    worker0Name,
+				},
+			}, nil)
+
+			err := reconciler.syncUpstreamData(ctx, adapter)
+			Expect(err).NotTo(HaveOccurred())
+
+			trackedTime, tracked := reconciler.missingDevices[deviceID]
+			Expect(tracked).To(BeTrue())
+			Expect(trackedTime).To(Equal(firstSeen))
+		})
+
+		It("should keep tracking device when grace period is exceeded but createDetachCR fails", func() {
+			deviceID := "GPU-device00-uuid-temp-0000-000000000000"
+			reconciler.missingDevices[deviceID] = time.Now().Add(-20 * time.Minute)
+
+			k8sClient.MockCreate = func(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
+				return errors.New("create composable resource fails")
+			}
+
+			adapter := newAdapter([]cdi.DeviceInfo{
+				{
+					DeviceID:    deviceID,
+					CDIDeviceID: "GPU-device00-uuid-temp-0000-000000000res",
+					DeviceType:  "gpu",
+					Model:       "NVIDIA-A100-PCIE-80GB",
+					NodeName:    worker0Name,
+				},
+			}, nil)
+
+			err := reconciler.syncUpstreamData(ctx, adapter)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, tracked := reconciler.missingDevices[deviceID]
+			Expect(tracked).To(BeTrue())
+		})
+
+		It("should remove tracked device when it no longer exists on upstream", func() {
+			deviceID := "GPU-device00-uuid-temp-0000-000000000000"
+			reconciler.missingDevices[deviceID] = time.Now().Add(-20 * time.Minute)
+
+			adapter := newAdapter([]cdi.DeviceInfo{}, nil)
+
+			err := reconciler.syncUpstreamData(ctx, adapter)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, tracked := reconciler.missingDevices[deviceID]
+			Expect(tracked).To(BeFalse())
+		})
+
+		It("should create detach CR and remove device from tracking when grace period is exceeded", func() {
+			deviceID := "GPU-device00-uuid-temp-0000-000000000000"
+			reconciler.missingDevices[deviceID] = time.Now().Add(-20 * time.Minute)
+
+			adapter := newAdapter([]cdi.DeviceInfo{
+				{
+					DeviceID:    deviceID,
+					CDIDeviceID: "GPU-device00-uuid-temp-0000-000000000res",
+					DeviceType:  "gpu",
+					Model:       "NVIDIA-A100-PCIE-80GB",
+					NodeName:    worker0Name,
+				},
+			}, nil)
+
+			err := reconciler.syncUpstreamData(ctx, adapter)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, tracked := reconciler.missingDevices[deviceID]
+			Expect(tracked).To(BeFalse())
+
+			composableResourceList := &crov1alpha1.ComposableResourceList{}
+			Expect(k8sClient.List(ctx, composableResourceList)).To(Succeed())
+			Expect(composableResourceList.Items).To(HaveLen(1))
+
+			created := composableResourceList.Items[0]
+			Expect(created.Labels["cohdi.io/ready-to-detach-device-id"]).To(Equal(deviceID))
+		})
 	})
 })
