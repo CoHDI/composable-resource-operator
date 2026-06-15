@@ -954,6 +954,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 				expectedRequestStatus  *crov1alpha1.ComposableResourceStatus
 				expectedReconcileError error
+				injectedGetError       error
 			}
 
 			DescribeTable("", func(tc testcase) {
@@ -961,6 +962,15 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				os.Setenv("FTI_CDI_CLUSTER_ID", tc.cluster_uuid)
 
 				Expect(callFunction(tc.extraHandling, tc.resourceName)).NotTo(HaveOccurred())
+
+				if tc.injectedGetError != nil {
+					k8sClient.MockGet = func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+						if _, ok := obj.(*crov1alpha1.ComposableResource); ok && key.Name == tc.resourceName {
+							return tc.injectedGetError
+						}
+						return k8sClient.Client.Get(ctx, key, obj, opts...)
+					}
+				}
 
 				composableResource, err := triggerComposableResourceReconcile(controllerReconciler, tc.resourceName, tc.ignoreGet)
 
@@ -978,6 +988,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					os.Unsetenv("FTI_CDI_TENANT_ID")
 					os.Unsetenv("FTI_CDI_CLUSTER_ID")
 
+					k8sClient.MockGet = nil
 					k8sClient.MockUpdate = nil
 					k8sClient.MockStatusUpdate = nil
 
@@ -991,6 +1002,17 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceName: "unexisted-composable-resource",
 					resourceSpec: baseComposableResource.Spec.DeepCopy(),
 					ignoreGet:    true,
+				}),
+
+				Entry("should return an error when get composableResource returns non-IsNotFound error", testcase{
+					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
+					cluster_uuid: "cluster0-uuid-temp-0000-000000000000",
+
+					resourceName:           "error-composable-resource",
+					resourceSpec:           baseComposableResource.Spec.DeepCopy(),
+					ignoreGet:              true,
+					injectedGetError:       errors.New("get composableResource failed unexpectedly"),
+					expectedReconcileError: errors.New("get composableResource failed unexpectedly"),
 				}),
 			)
 		})
@@ -1010,6 +1032,9 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				expectedTaintDeleted bool
 				expectedGCDone       bool
 				expectedReconcileErr string
+				injectedGetNodeErr   error
+				injectedGetTaintErr  error
+				injectedDeleteCRErr  error
 			}
 
 			var patches *gomonkey.Patches
@@ -1025,6 +1050,33 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 				composableResource := &crov1alpha1.ComposableResource{}
 				Expect(k8sClient.Get(ctx, types.NamespacedName{Name: tc.resourceName}, composableResource)).To(Succeed())
+
+				if tc.injectedGetNodeErr != nil {
+					k8sClient.MockGet = func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+						if _, ok := obj.(*corev1.Node); ok && key.Name == composableResource.Spec.TargetNode {
+							return tc.injectedGetNodeErr
+						}
+						return k8sClient.Client.Get(ctx, key, obj, opts...)
+					}
+				}
+
+				if tc.injectedGetTaintErr != nil {
+					k8sClient.MockGet = func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+						if _, ok := obj.(*v1alpha3.DeviceTaintRule); ok && key.Name == fmt.Sprintf("%s-taint", composableResource.Name) {
+							return tc.injectedGetTaintErr
+						}
+						return k8sClient.Client.Get(ctx, key, obj, opts...)
+					}
+				}
+
+				if tc.injectedDeleteCRErr != nil {
+					k8sClient.MockDelete = func(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error {
+						if _, ok := obj.(*crov1alpha1.ComposableResource); ok && obj.GetName() == composableResource.Name {
+							return tc.injectedDeleteCRErr
+						}
+						return k8sClient.Client.Delete(ctx, obj, opts...)
+					}
+				}
 
 				gcDone, err := controllerReconciler.performGarbageCollection(ctx, composableResource)
 
@@ -1064,6 +1116,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					k8sClient.MockGet = nil
 					k8sClient.MockUpdate = nil
 					k8sClient.MockStatusUpdate = nil
+					k8sClient.MockDelete = nil
 
 					Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
 					Expect(k8sClient.DeleteAllOf(ctx, &v1alpha3.DeviceTaintRule{})).To(Succeed())
@@ -1112,6 +1165,48 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					}(),
 					expectedDeleted: false,
 					expectedGCDone:  false,
+				}),
+
+				Entry("should return error when CheckNodeExists returns error other than IsNotFound", testcase{
+					resourceName:   "gc-node-error",
+					resourceSpec:   baseComposableResource.Spec.DeepCopy(),
+					resourceStatus: baseComposableResource.Status.DeepCopy(),
+					resourceState:  "Attaching",
+
+					extraHandling: func(resourceName string) {
+						Expect(k8sClient.Create(ctx, &corev1.Node{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: baseComposableResource.Spec.TargetNode,
+							},
+						})).To(Succeed())
+					},
+
+					expectedStatus: func() *crov1alpha1.ComposableResourceStatus {
+						status := baseComposableResource.Status.DeepCopy()
+						status.State = "Attaching"
+						return status
+					}(),
+					expectedDeleted:      false,
+					expectedGCDone:       false,
+					expectedReconcileErr: "get node fails unexpectedly",
+					injectedGetNodeErr:   errors.New("get node fails unexpectedly"),
+				}),
+
+				Entry("should return error when failed to get DeviceTaintRule", testcase{
+					resourceName:   "gc-taint-error",
+					resourceSpec:   baseComposableResource.Spec.DeepCopy(),
+					resourceStatus: baseComposableResource.Status.DeepCopy(),
+					resourceState:  "Attaching",
+
+					expectedStatus: func() *crov1alpha1.ComposableResourceStatus {
+						status := baseComposableResource.Status.DeepCopy()
+						status.State = "Attaching"
+						return status
+					}(),
+					expectedDeleted:      false,
+					expectedGCDone:       false,
+					expectedReconcileErr: "failed to get DeviceTaintRule gc-taint-error-taint: get taint fails unexpectedly",
+					injectedGetTaintErr:  errors.New("get taint fails unexpectedly"),
 				}),
 
 				Entry("should transition to Deleting and delete CR when target node is missing and taint is absent", testcase{
@@ -1221,6 +1316,25 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					}(),
 					expectedDeleted: true,
 					expectedGCDone:  false,
+				}),
+
+				Entry("should return error when failed to delete composableResource", testcase{
+					resourceName:   "gc-delete-cr-fails",
+					resourceSpec:   baseComposableResource.Spec.DeepCopy(),
+					resourceStatus: baseComposableResource.Status.DeepCopy(),
+					resourceState:  "Attaching",
+
+					expectedStatus: func() *crov1alpha1.ComposableResourceStatus {
+						status := baseComposableResource.Status.DeepCopy()
+						status.State = "Deleting"
+						status.Error = fmt.Sprintf("target node %s not found", baseComposableResource.Spec.TargetNode)
+						return status
+					}(),
+
+					expectedDeleted:      false,
+					expectedGCDone:       false,
+					expectedReconcileErr: "delete composableResource fails unexpectedly",
+					injectedDeleteCRErr:  errors.New("delete composableResource fails unexpectedly"),
 				}),
 
 				Entry("should return error when status update fails during garbage collection", testcase{

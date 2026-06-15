@@ -91,6 +91,7 @@ type MyClient struct {
 	MockList         func(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error
 	MockUpdate       func(ctx context.Context, obj client.Object, opts ...client.UpdateOption) error
 	MockStatusUpdate func(originalUpdate func(client.Object, ...client.SubResourceUpdateOption) error, ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error
+	MockDelete       func(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error
 }
 
 func (m *MyClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
@@ -126,6 +127,13 @@ func (m *MyClient) Status() client.StatusWriter {
 		StatusWriter:     m.Client.Status(),
 		mockStatusUpdate: m.MockStatusUpdate,
 	}
+}
+
+func (m *MyClient) Delete(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error {
+	if m.MockDelete != nil {
+		return m.MockDelete(ctx, obj, opts...)
+	}
+	return m.Client.Delete(ctx, obj, opts...)
 }
 
 type MockExecutor struct {
