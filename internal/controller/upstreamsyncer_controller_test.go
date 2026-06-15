@@ -31,7 +31,6 @@ import (
 	"github.com/CoHDI/composable-resource-operator/internal/cdi"
 	"github.com/agiledragon/gomonkey/v2"
 	metal3v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
-	machinev1beta1 "github.com/metal3-io/cluster-api-provider-metal3/api/v1beta1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
@@ -237,7 +236,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 				k8sClient.MockStatusUpdate = nil
 
 				Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
-				Expect(k8sClient.DeleteAllOf(ctx, &machinev1beta1.Metal3Machine{}, client.InNamespace("openshift-machine-api"))).NotTo(HaveOccurred())
+				deleteAllOpenShiftMachines("openshift-machine-api")
 				Expect(k8sClient.DeleteAllOf(ctx, &metal3v1alpha1.BareMetalHost{}, client.InNamespace("openshift-machine-api"))).NotTo(HaveOccurred())
 				Expect(k8sClient.DeleteAllOf(ctx, &corev1.Secret{}, client.InNamespace("composable-resource-operator-system"))).NotTo(HaveOccurred())
 
@@ -281,7 +280,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 				cluster_uuid: "cluster0-uuid-temp-0000-000000000000",
 
 				extraHandling: func() {
-					Expect(k8sClient.DeleteAllOf(ctx, &machinev1beta1.Metal3Machine{}, client.InNamespace("openshift-machine-api"))).NotTo(HaveOccurred())
+					deleteAllOpenShiftMachines("openshift-machine-api")
 					Expect(k8sClient.DeleteAllOf(ctx, &metal3v1alpha1.BareMetalHost{}, client.InNamespace("openshift-machine-api"))).NotTo(HaveOccurred())
 					Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
 					nodesToCreate := []*corev1.Node{
@@ -300,7 +299,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 					}
 				},
 
-				expectedReconcileError: "failed to fetch data from upstream server: metal3machines.infrastructure.cluster.x-k8s.io \"machine-worker-0\" not found",
+				expectedReconcileError: "failed to fetch data from upstream server: machines.machine.openshift.io \"machine-worker-0\" not found",
 			}),
 			Entry("should fail because the CM returns an error message", testcase{
 				tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -321,15 +320,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 						Expect(k8sClient.Create(ctx, node)).To(Succeed())
 					}
 
-					machine0 := &machinev1beta1.Metal3Machine{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "machine-worker-0",
-							Namespace: "openshift-machine-api",
-							Annotations: map[string]string{
-								"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-							},
-						},
-					}
+					machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 					Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 					bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -360,7 +351,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 					Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 				},
 
-				expectedReconcileError: "failed to fetch data from upstream server: failed to process CM get request. http returned status: '404', cm return code: 'E02XXXX', error message: 'machine not found'",
+				expectedReconcileError: "failed to fetch data from upstream server: failed to process CM get request. http returned status: 404",
 			}),
 			Entry("should wait when there is an extra device in upstram server because it needs to track with grace period", testcase{
 				tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -381,15 +372,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 						Expect(k8sClient.Create(ctx, node)).To(Succeed())
 					}
 
-					machine0 := &machinev1beta1.Metal3Machine{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "machine-worker-0",
-							Namespace: "openshift-machine-api",
-							Annotations: map[string]string{
-								"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-							},
-						},
-					}
+					machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 					Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 					bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -444,15 +427,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 						Expect(k8sClient.Create(ctx, node)).To(Succeed())
 					}
 
-					machine0 := &machinev1beta1.Metal3Machine{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "machine-worker-0",
-							Namespace: "openshift-machine-api",
-							Annotations: map[string]string{
-								"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-							},
-						},
-					}
+					machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 					Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 					bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -509,15 +484,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 						Expect(k8sClient.Create(ctx, node)).To(Succeed())
 					}
 
-					machine0 := &machinev1beta1.Metal3Machine{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "machine-worker-0",
-							Namespace: "openshift-machine-api",
-							Annotations: map[string]string{
-								"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-							},
-						},
-					}
+					machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 					Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 					bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -572,15 +539,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 						Expect(k8sClient.Create(ctx, node)).To(Succeed())
 					}
 
-					machine0 := &machinev1beta1.Metal3Machine{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "machine-worker-0",
-							Namespace: "openshift-machine-api",
-							Annotations: map[string]string{
-								"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-							},
-						},
-					}
+					machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 					Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 					bmh0 := &metal3v1alpha1.BareMetalHost{

@@ -32,7 +32,6 @@ import (
 
 	"github.com/agiledragon/gomonkey/v2"
 	metal3v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
-	machinev1beta1 "github.com/metal3-io/cluster-api-provider-metal3/api/v1beta1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
@@ -263,7 +262,7 @@ func generateCMMachineData(isAttachFailed bool, isDetachFailed bool, isSucceeded
 					FabricGID:        "",
 					ResourceType:     "",
 					ResourceName:     "",
-					ResourceStatus:   "",
+					ResourceStatus:   0,
 					ResourceOPStatus: "0",
 					ResourceSpec: []fticmapi.DeviceResourceSpec{
 						{
@@ -294,7 +293,7 @@ func generateCMMachineData(isAttachFailed bool, isDetachFailed bool, isSucceeded
 					FabricGID:        "",
 					ResourceType:     "",
 					ResourceName:     "",
-					ResourceStatus:   "",
+					ResourceStatus:   0,
 					ResourceOPStatus: "0",
 					ResourceSpec: []fticmapi.DeviceResourceSpec{
 						{
@@ -325,7 +324,7 @@ func generateCMMachineData(isAttachFailed bool, isDetachFailed bool, isSucceeded
 					FabricGID:        "",
 					ResourceType:     "",
 					ResourceName:     "",
-					ResourceStatus:   "",
+					ResourceStatus:   0,
 					ResourceOPStatus: "0",
 					ResourceSpec: []fticmapi.DeviceResourceSpec{
 						{
@@ -358,7 +357,7 @@ func generateCMMachineData(isAttachFailed bool, isDetachFailed bool, isSucceeded
 						FabricGID:        "",
 						ResourceType:     "",
 						ResourceName:     "",
-						ResourceStatus:   "",
+						ResourceStatus:   0,
 						ResourceOPStatus: "1",
 						ResourceSpec: []fticmapi.DeviceResourceSpec{
 							{
@@ -387,7 +386,7 @@ func generateCMMachineData(isAttachFailed bool, isDetachFailed bool, isSucceeded
 						FabricGID:        "",
 						ResourceType:     "",
 						ResourceName:     "",
-						ResourceStatus:   "",
+						ResourceStatus:   0,
 						ResourceOPStatus: "2",
 						ResourceSpec: []fticmapi.DeviceResourceSpec{
 							{
@@ -416,7 +415,7 @@ func generateCMMachineData(isAttachFailed bool, isDetachFailed bool, isSucceeded
 						FabricGID:        "",
 						ResourceType:     "",
 						ResourceName:     "",
-						ResourceStatus:   "",
+						ResourceStatus:   0,
 						ResourceOPStatus: "3",
 						ResourceSpec: []fticmapi.DeviceResourceSpec{
 							{
@@ -1583,7 +1582,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					os.Setenv("FTI_CDI_ENDPOINT", endpoint)
 
 					Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
-					Expect(k8sClient.DeleteAllOf(ctx, &machinev1beta1.Metal3Machine{}, client.InNamespace("openshift-machine-api"))).NotTo(HaveOccurred())
+					deleteAllOpenShiftMachines("openshift-machine-api")
 					Expect(k8sClient.DeleteAllOf(ctx, &metal3v1alpha1.BareMetalHost{}, client.InNamespace("openshift-machine-api"))).NotTo(HaveOccurred())
 					Expect(k8sClient.DeleteAllOf(ctx, &corev1.Secret{}, client.InNamespace("composable-resource-operator-system"))).NotTo(HaveOccurred())
 
@@ -1681,7 +1680,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						createNvidiaDriverDaemonset("gpu-operator")
 					},
 
-					expectedReconcileError: "metal3machines.infrastructure.cluster.x-k8s.io \"machine-worker-0\" not found",
+					expectedReconcileError: "machines.machine.openshift.io \"machine-worker-0\" not found",
 				}),
 				Entry("should fail when trying to add resource because the annotation is not found in Machine CR", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -1708,12 +1707,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						createNvidiaDriverDaemonset("gpu-operator")
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", nil)
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 					},
 
@@ -1744,15 +1738,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						createNvidiaDriverDaemonset("gpu-operator")
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 					},
 
@@ -1783,15 +1769,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						createNvidiaDriverDaemonset("gpu-operator")
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -1830,15 +1808,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						createNvidiaDriverDaemonset("gpu-operator")
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -1880,15 +1850,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						createNvidiaDriverDaemonset("gpu-operator")
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -1946,15 +1908,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						createNvidiaDriverDaemonset("gpu-operator")
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -2012,15 +1966,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						createNvidiaDriverDaemonset("gpu-operator")
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -2078,15 +2024,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						createNvidiaDriverDaemonset("gpu-operator")
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -2144,15 +2082,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						createNvidiaDriverDaemonset("gpu-operator")
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -2210,15 +2140,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						createNvidiaDriverDaemonset("gpu-operator")
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -2249,7 +2171,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 					},
 
-					expectedReconcileError: "failed to process CM get request. http returned status: '404', cm return code: 'E02XXXX', error message: 'machine not found'",
+					expectedReconcileError: "failed to process CM get request. http returned status: 404",
 				}),
 				Entry("should fail when trying to get MachineInfo because the CM returns a non-JSON formatted error message", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -2276,15 +2198,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						createNvidiaDriverDaemonset("gpu-operator")
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -2315,7 +2229,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 					},
 
-					expectedReconcileError: "failed to unmarshal CM get error response body into errBody. Original error: invalid character '<' looking for beginning of value",
+					expectedReconcileError: "failed to process CM get request. http returned status: 404",
 				}),
 				Entry("should fail when trying to get MachineInfo because the CM returns a non-JSON formatted response body", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -2342,15 +2256,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						createNvidiaDriverDaemonset("gpu-operator")
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -2408,15 +2314,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						createNvidiaDriverDaemonset("gpu-operator")
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -2447,7 +2345,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 					},
 
-					expectedReconcileError: "failed to process CM scaleup request. http returned status: '404', cm return code: 'E02XXXX', error message: 'scaleup method not found'",
+					expectedReconcileError: "failed to process CM scaleup request. http returned status: 404",
 				}),
 				Entry("should fail when trying to send scaleup request to CM because the CM returns a non-JSON formatted error message", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -2474,15 +2372,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						createNvidiaDriverDaemonset("gpu-operator")
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -2513,7 +2403,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 					},
 
-					expectedReconcileError: "failed to unmarshal CM scaleup error response body into errBody. Original error: invalid character '<' looking for beginning of value",
+					expectedReconcileError: "failed to process CM scaleup request. http returned status: 404",
 				}),
 				Entry("should wait when the GPU has not yet been added in CM", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -2540,15 +2430,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						createNvidiaDriverDaemonset("gpu-operator")
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -2610,15 +2492,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						createNvidiaDriverDaemonset("gpu-operator")
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -2676,15 +2550,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 						createNvidiaDriverDaemonset("gpu-operator")
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -2775,15 +2641,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -2887,15 +2745,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -3017,15 +2867,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -3150,15 +2992,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -3294,15 +3128,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -3433,15 +3259,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -3634,15 +3452,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -3852,7 +3662,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					k8sClient.MockStatusUpdate = nil
 
 					Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
-					Expect(k8sClient.DeleteAllOf(ctx, &machinev1beta1.Metal3Machine{}, client.InNamespace("openshift-machine-api"))).NotTo(HaveOccurred())
+					deleteAllOpenShiftMachines("openshift-machine-api")
 					Expect(k8sClient.DeleteAllOf(ctx, &metal3v1alpha1.BareMetalHost{}, client.InNamespace("openshift-machine-api"))).NotTo(HaveOccurred())
 					Expect(k8sClient.DeleteAllOf(ctx, &corev1.Secret{}, client.InNamespace("composable-resource-operator-system"))).NotTo(HaveOccurred())
 
@@ -3894,7 +3704,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					expectedRequestStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.State = "Online"
-						composableResourceStatus.Error = "metal3machines.infrastructure.cluster.x-k8s.io \"machine-worker-0\" not found"
+						composableResourceStatus.Error = "machines.machine.openshift.io \"machine-worker-0\" not found"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
 						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
@@ -3929,15 +3739,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -3971,7 +3773,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					expectedRequestStatus: func() *crov1alpha1.ComposableResourceStatus {
 						composableResourceStatus := baseComposableResource.Status.DeepCopy()
 						composableResourceStatus.State = "Online"
-						composableResourceStatus.Error = "failed to process CM get request. http returned status: '404', cm return code: 'E02XXXX', error message: 'machine not found'"
+						composableResourceStatus.Error = "failed to process CM get request. http returned status: 404"
 						composableResourceStatus.DeviceID = "GPU-device00-uuid-temp-0000-000000000000"
 						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
@@ -4006,15 +3808,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -4083,15 +3877,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -4160,15 +3946,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -4237,15 +4015,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -4314,15 +4084,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -4407,15 +4169,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -4514,7 +4268,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					k8sClient.MockStatusUpdate = nil
 
 					Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
-					Expect(k8sClient.DeleteAllOf(ctx, &machinev1beta1.Metal3Machine{}, client.InNamespace("openshift-machine-api"))).NotTo(HaveOccurred())
+					deleteAllOpenShiftMachines("openshift-machine-api")
 					Expect(k8sClient.DeleteAllOf(ctx, &metal3v1alpha1.BareMetalHost{}, client.InNamespace("openshift-machine-api"))).NotTo(HaveOccurred())
 					Expect(k8sClient.DeleteAllOf(ctx, &corev1.Secret{}, client.InNamespace("composable-resource-operator-system"))).NotTo(HaveOccurred())
 
@@ -5017,15 +4771,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -5111,7 +4857,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						)
 					},
 
-					expectedReconcileError: "failed to process CM get request. http returned status: '404', cm return code: 'E02XXXX', error message: 'machine not found'",
+					expectedReconcileError: "failed to process CM get request. http returned status: 404",
 				}),
 				Entry("should fail when removing gpu because the CM returns an error message", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -5186,15 +4932,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Update(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -5280,7 +5018,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						)
 					},
 
-					expectedReconcileError: "failed to process CM scaledown request. http returned status: 404, cm return code: E02XXXX, error message: scaledown method not found",
+					expectedReconcileError: "failed to process CM scaledown request. http returned status: 404",
 				}),
 				Entry("should fail when removing gpu because the CM returns a non-JSON formatted error message", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -5356,15 +5094,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -5450,7 +5180,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						)
 					},
 
-					expectedReconcileError: "failed to unmarshal CM scaledown error response body into errBody. Original error: invalid character '<' looking for beginning of value",
+					expectedReconcileError: "failed to process CM scaledown request. http returned status: 404",
 				}),
 				Entry("should wait when the ComposableResource is being removed in upstream server", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -5524,15 +5254,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -5713,15 +5435,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Update(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -5892,15 +5606,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Update(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -6084,15 +5790,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -6391,7 +6089,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					os.Setenv("FTI_CDI_ENDPOINT", endpoint)
 
 					Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
-					Expect(k8sClient.DeleteAllOf(ctx, &machinev1beta1.Metal3Machine{}, client.InNamespace("openshift-machine-api"))).NotTo(HaveOccurred())
+					deleteAllMetal3Machines("openshift-machine-api")
 					Expect(k8sClient.DeleteAllOf(ctx, &metal3v1alpha1.BareMetalHost{}, client.InNamespace("openshift-machine-api"))).NotTo(HaveOccurred())
 					Expect(k8sClient.DeleteAllOf(ctx, &corev1.Secret{}, client.InNamespace("composable-resource-operator-system"))).NotTo(HaveOccurred())
 
@@ -6507,12 +6205,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-							},
-						}
+						machine0 := newMetal3Machine("machine-worker-0", "openshift-machine-api", nil)
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 					},
 
@@ -6542,15 +6235,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newMetal3Machine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 					},
 
@@ -6580,15 +6265,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newMetal3Machine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -6626,15 +6303,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newMetal3Machine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -6691,15 +6360,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newMetal3Machine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -6756,15 +6417,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newMetal3Machine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -6821,15 +6474,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newMetal3Machine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -6886,15 +6531,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newMetal3Machine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -6951,15 +6588,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newMetal3Machine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -7016,15 +6645,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newMetal3Machine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -7081,15 +6702,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newMetal3Machine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -7210,15 +6823,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newMetal3Machine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -7390,15 +6995,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newMetal3Machine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -7564,15 +7161,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newMetal3Machine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -7744,15 +7333,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newMetal3Machine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -7987,7 +7568,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					k8sClient.MockStatusUpdate = nil
 
 					Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
-					Expect(k8sClient.DeleteAllOf(ctx, &machinev1beta1.Metal3Machine{}, client.InNamespace("openshift-machine-api"))).NotTo(HaveOccurred())
+					deleteAllMetal3Machines("openshift-machine-api")
 					Expect(k8sClient.DeleteAllOf(ctx, &metal3v1alpha1.BareMetalHost{}, client.InNamespace("openshift-machine-api"))).NotTo(HaveOccurred())
 					Expect(k8sClient.DeleteAllOf(ctx, &corev1.Secret{}, client.InNamespace("composable-resource-operator-system"))).NotTo(HaveOccurred())
 
@@ -8064,15 +7645,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newMetal3Machine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -8141,15 +7714,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newMetal3Machine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -8218,15 +7783,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newMetal3Machine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -8295,15 +7852,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newMetal3Machine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -8371,15 +7920,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newMetal3Machine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -8449,15 +7990,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newMetal3Machine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -8526,15 +8059,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newMetal3Machine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -8603,15 +8128,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newMetal3Machine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -8735,7 +8252,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					k8sClient.MockStatusUpdate = nil
 
 					Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
-					Expect(k8sClient.DeleteAllOf(ctx, &machinev1beta1.Metal3Machine{}, client.InNamespace("openshift-machine-api"))).NotTo(HaveOccurred())
+					deleteAllMetal3Machines("openshift-machine-api")
 					Expect(k8sClient.DeleteAllOf(ctx, &metal3v1alpha1.BareMetalHost{}, client.InNamespace("openshift-machine-api"))).NotTo(HaveOccurred())
 					Expect(k8sClient.DeleteAllOf(ctx, &corev1.Secret{}, client.InNamespace("composable-resource-operator-system"))).NotTo(HaveOccurred())
 
@@ -9100,15 +8617,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newMetal3Machine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -9230,15 +8739,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Update(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newMetal3Machine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -9356,15 +8857,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newMetal3Machine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -9499,15 +8992,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newMetal3Machine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -9669,15 +9154,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							Expect(k8sClient.Create(ctx, node)).To(Succeed())
 						}
 
-						machine0 := &machinev1beta1.Metal3Machine{
-							ObjectMeta: metav1.ObjectMeta{
-								Name:      "machine-worker-0",
-								Namespace: "openshift-machine-api",
-								Annotations: map[string]string{
-									"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-								},
-							},
-						}
+						machine0 := newMetal3Machine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 						Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 						bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -9914,7 +9391,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				os.Unsetenv("FTI_CDI_CLUSTER_ID")
 
 				Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
-				Expect(k8sClient.DeleteAllOf(ctx, &machinev1beta1.Metal3Machine{}, client.InNamespace("openshift-machine-api"))).NotTo(HaveOccurred())
+				deleteAllOpenShiftMachines("openshift-machine-api")
 				Expect(k8sClient.DeleteAllOf(ctx, &metal3v1alpha1.BareMetalHost{}, client.InNamespace("openshift-machine-api"))).NotTo(HaveOccurred())
 				Expect(k8sClient.DeleteAllOf(ctx, &corev1.Secret{}, client.InNamespace("composable-resource-operator-system"))).NotTo(HaveOccurred())
 
@@ -10006,15 +9483,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 					}
 
-					machine0 := &machinev1beta1.Metal3Machine{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "machine-worker-0",
-							Namespace: "openshift-machine-api",
-							Annotations: map[string]string{
-								"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-							},
-						},
-					}
+					machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 					Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 					bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -10187,15 +9656,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						}
 					}
 
-					machine0 := &machinev1beta1.Metal3Machine{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "machine-worker-0",
-							Namespace: "openshift-machine-api",
-							Annotations: map[string]string{
-								"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-							},
-						},
-					}
+					machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 					Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 					bmh0 := &metal3v1alpha1.BareMetalHost{

@@ -35,7 +35,9 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -65,6 +67,90 @@ var (
 	worker6Name = "worker-6"
 	worker7Name = "worker-7"
 )
+
+var openShiftMachineGVK = schema.GroupVersionKind{
+	Group:   "machine.openshift.io",
+	Version: "v1beta1",
+	Kind:    "Machine",
+}
+
+func newOpenShiftMachine(name, namespace string, annotations map[string]string) *unstructured.Unstructured {
+	machine := &unstructured.Unstructured{}
+	machine.SetGroupVersionKind(openShiftMachineGVK)
+	machine.SetName(name)
+	machine.SetNamespace(namespace)
+	machine.SetAnnotations(annotations)
+	return machine
+}
+
+func deleteAllOpenShiftMachines(namespace string) {
+	machine := &unstructured.Unstructured{}
+	machine.SetGroupVersionKind(openShiftMachineGVK)
+	Expect(k8sClient.DeleteAllOf(ctx, machine, client.InNamespace(namespace))).NotTo(HaveOccurred())
+}
+
+func newMetal3Machine(name, namespace string, annotations map[string]string) *machinev1beta1.Metal3Machine {
+	return &machinev1beta1.Metal3Machine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Namespace:   namespace,
+			Annotations: annotations,
+		},
+	}
+}
+
+func deleteAllMetal3Machines(namespace string) {
+	Expect(k8sClient.DeleteAllOf(ctx, &machinev1beta1.Metal3Machine{}, client.InNamespace(namespace))).NotTo(HaveOccurred())
+}
+
+func installOpenShiftMachineCRD(ctx context.Context, cfg *rest.Config) {
+	apiExtensionsClient, err := apiextensionsclientset.NewForConfig(cfg)
+	Expect(err).NotTo(HaveOccurred())
+
+	crd, err := apiExtensionsClient.ApiextensionsV1().CustomResourceDefinitions().Create(ctx, &apiextensionsv1.CustomResourceDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "machines.machine.openshift.io",
+		},
+		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
+			Group: "machine.openshift.io",
+			Names: apiextensionsv1.CustomResourceDefinitionNames{
+				Kind:     "Machine",
+				ListKind: "MachineList",
+				Plural:   "machines",
+				Singular: "machine",
+			},
+			Scope: apiextensionsv1.NamespaceScoped,
+			Versions: []apiextensionsv1.CustomResourceDefinitionVersion{
+				{
+					Name:    "v1beta1",
+					Served:  true,
+					Storage: true,
+					Schema: &apiextensionsv1.CustomResourceValidation{
+						OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
+							Type:                   "object",
+							XPreserveUnknownFields: ptr.To(true),
+						},
+					},
+				},
+			},
+		},
+	}, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred())
+
+	err = wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, 5*time.Second, true, func(ctx context.Context) (bool, error) {
+		current, err := apiExtensionsClient.ApiextensionsV1().CustomResourceDefinitions().Get(ctx, crd.Name, metav1.GetOptions{})
+		if err != nil {
+			return false, err
+		}
+		for _, condition := range current.Status.Conditions {
+			if condition.Type == apiextensionsv1.Established && condition.Status == apiextensionsv1.ConditionTrue {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+	Expect(err).NotTo(HaveOccurred())
+}
 
 var (
 	composableResource0Name = "gpu-00000000-temp-uuid-0000-000000000000"
@@ -298,6 +384,7 @@ var _ = BeforeSuite(func() {
 	cfg, err = testEnv.Start()
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
+	installOpenShiftMachineCRD(ctx, cfg)
 	installNvidiaClusterPolicyCRD(ctx, cfg)
 
 	s := scheme.Scheme
