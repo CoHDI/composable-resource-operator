@@ -46,6 +46,13 @@ type ComposableResourceReconciler struct {
 
 var composableResourceLog = ctrl.Log.WithName("composable_resource_controller")
 
+func nvidiaGpuOperatorNamespace() string {
+	if ns := os.Getenv("NVIDIA_GPU_OPERATOR_NAMESPACE"); ns != "" {
+		return ns
+	}
+	return "gpu-operator"
+}
+
 // +kubebuilder:rbac:groups=cro.hpsys.ibm.ie.com,resources=composableresources,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=cro.hpsys.ibm.ie.com,resources=composableresources/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=cro.hpsys.ibm.ie.com,resources=composableresources/finalizers,verbs=update
@@ -244,14 +251,14 @@ func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context,
 			composableResourceLog.Error(err, "failed to check gpu loads in TargetNode", "TargetNode", resource.Spec.TargetNode, "composableResource", resource.Name)
 		}
 
-		if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-gpu-operator", "nvidia-device-plugin-daemonset"); err != nil {
+		if err := utils.RestartDaemonset(ctx, r.Client, nvidiaGpuOperatorNamespace(), "nvidia-device-plugin-daemonset"); err != nil {
 			composableResourceLog.Error(err, "failed to restart nvidia-device-plugin-daemonset", "composableResource", resource.Name)
 			resource.Status.Error = err.Error()
 			if err := r.Status().Update(ctx, resource); err != nil {
 				return r.requeueOnErr(resource, err, "failed to update composableResource", "composableResource", resource.Name)
 			}
 		}
-		if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-gpu-operator", "nvidia-dcgm"); err != nil {
+		if err := utils.RestartDaemonset(ctx, r.Client, nvidiaGpuOperatorNamespace(), "nvidia-dcgm"); err != nil {
 			composableResourceLog.Error(err, "failed to restart nvidia-dcgm", "composableResource", resource.Name)
 			resource.Status.Error = err.Error()
 			if err := r.Status().Update(ctx, resource); err != nil {
@@ -368,10 +375,10 @@ func (r *ComposableResourceReconciler) handleDetachingState(ctx context.Context,
 
 		// Restart the device plugin / DRA daemonsets to reflect the change.
 		if deviceResourceType == "DEVICE_PLUGIN" {
-			if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-gpu-operator", "nvidia-device-plugin-daemonset"); err != nil {
+			if err := utils.RestartDaemonset(ctx, r.Client, nvidiaGpuOperatorNamespace(), "nvidia-device-plugin-daemonset"); err != nil {
 				return r.requeueOnErr(resource, err, "failed to restart nvidia-device-plugin-daemonset", "composableResource", resource.Name)
 			}
-			if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-gpu-operator", "nvidia-dcgm"); err != nil {
+			if err := utils.RestartDaemonset(ctx, r.Client, nvidiaGpuOperatorNamespace(), "nvidia-dcgm"); err != nil {
 				return r.requeueOnErr(resource, err, "failed to restart nvidia-dcgm", "composableResource", resource.Name)
 			}
 		} else {

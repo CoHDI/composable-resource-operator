@@ -10267,3 +10267,29 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 		})
 	})
 })
+
+var _ = Describe("nvidiaGpuOperatorNamespace", func() {
+	It("returns the default 'gpu-operator' when the env var is unset", func() {
+		original := os.Getenv("NVIDIA_GPU_OPERATOR_NAMESPACE")
+		os.Unsetenv("NVIDIA_GPU_OPERATOR_NAMESPACE")
+		defer os.Setenv("NVIDIA_GPU_OPERATOR_NAMESPACE", original)
+
+		Expect(nvidiaGpuOperatorNamespace()).To(Equal("gpu-operator"))
+	})
+
+	It("returns the env var value when NVIDIA_GPU_OPERATOR_NAMESPACE is set", func() {
+		original := os.Getenv("NVIDIA_GPU_OPERATOR_NAMESPACE")
+		os.Setenv("NVIDIA_GPU_OPERATOR_NAMESPACE", "custom-ns")
+		defer os.Setenv("NVIDIA_GPU_OPERATOR_NAMESPACE", original)
+
+		Expect(nvidiaGpuOperatorNamespace()).To(Equal("custom-ns"))
+	})
+
+	It("returns the default when the env var is set to empty string", func() {
+		original := os.Getenv("NVIDIA_GPU_OPERATOR_NAMESPACE")
+		os.Setenv("NVIDIA_GPU_OPERATOR_NAMESPACE", "")
+		defer os.Setenv("NVIDIA_GPU_OPERATOR_NAMESPACE", original)
+
+		Expect(nvidiaGpuOperatorNamespace()).To(Equal("gpu-operator"))
+	})
+})

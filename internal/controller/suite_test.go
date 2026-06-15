@@ -19,6 +19,7 @@ package controller
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
@@ -185,6 +186,8 @@ func TestControllers(t *testing.T) {
 var _ = BeforeSuite(func() {
 	format.MaxLength = 1000
 	format.TruncatedDiff = false
+
+	os.Setenv("NVIDIA_GPU_OPERATOR_NAMESPACE", "nvidia-gpu-operator")
 
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
 
