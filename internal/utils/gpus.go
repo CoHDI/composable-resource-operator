@@ -1080,21 +1080,19 @@ func getCroNodeAgentPod(ctx context.Context, clientset *kubernetes.Clientset, ta
 
 func killNvidiaPersistencedInDriverPod(ctx context.Context, clientset *kubernetes.Clientset, restConfig *rest.Config, pod *corev1.Pod) error {
 	killScript := `
-if command -v pkill >/dev/null 2>&1; then
-	pkill -9 -f '[n]vidia-persistenced' >/dev/null 2>&1 || true
-	exit 0
-fi
+pid_file="/var/run/nvidia-persistenced/nvidia-persistenced.pid"
 
-for pidDir in /proc/[0-9]*; do
-	[ -r "$pidDir/comm" ] || continue
-	cmdName=$(cat "$pidDir/comm" 2>/dev/null || true)
-	case "$cmdName" in
-		nvidia-persistenced|nvidia-persiste)
-			pid=${pidDir#/proc/}
-			kill -9 "$pid" >/dev/null 2>&1 || true
-			;;
-	esac
-done
+[ -s "$pid_file" ] || exit 0
+
+pid=$(cat "$pid_file" 2>/dev/null || true)
+[ -n "$pid" ] || exit 0
+
+[ -r "/proc/$pid/comm" ] || exit 0
+comm=$(cat "/proc/$pid/comm" 2>/dev/null || true)
+[ "$comm" = "nvidia-persiste" ] || exit 0
+
+kill -9 "$pid" >/dev/null 2>&1 || true
+exit 0
 `
 	command := []string{"/bin/sh", "-c", killScript}
 	stdOut, stdErr, execErr := execCommandInPod(

@@ -2704,7 +2704,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=gpu_uuid")) {
 									return newMockExecutor("GPU-device00-uuid-temp-0000-000000000000", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -2826,7 +2826,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=gpu_uuid")) {
 									return newMockExecutor("GPU-device00-uuid-temp-0000-000000000000", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -2951,7 +2951,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=gpu_uuid")) {
 									return newMockExecutor("GPU-device00-uuid-temp-0000-000000000000", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -3087,7 +3087,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=gpu_uuid")) {
 									return newMockExecutor("GPU-device00-uuid-temp-0000-000000000000", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -3218,7 +3218,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=gpu_uuid")) {
 									return newMockExecutor("GPU-device00-uuid-temp-0000-000000000000", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -3363,7 +3363,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=gpu_uuid")) {
 									return newMockExecutor("GPU-device00-uuid-temp-0000-000000000000", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -3556,7 +3556,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=gpu_uuid")) {
 									return newMockExecutor("GPU-device00-uuid-temp-0000-000000000000", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -4341,7 +4341,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "nvidia-smi: command not found")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -4393,7 +4393,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("GPU-device00-uuid-temp-0000-000000000000, gpu_load_progress", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -4479,7 +4479,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 									return newMockExecutor("Drain State: Not Draining", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("TARGET_FILE")) {
 									return newMockExecutor("nvidia-persist", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -4572,7 +4572,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -4687,7 +4687,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -4848,7 +4848,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -5009,7 +5009,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -5171,7 +5171,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -5331,7 +5331,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -5512,7 +5512,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -5701,7 +5701,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -5907,7 +5907,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -6781,7 +6781,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=gpu_uuid")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -6954,7 +6954,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=gpu_uuid")) {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -7126,7 +7126,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=gpu_uuid")) {
 									return newMockExecutor("", "nvidia-smi: command not found")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -7292,7 +7292,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=gpu_uuid")) {
 									return newMockExecutor("GPU-device00-uuid-temp-0000-000000000000", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -7464,7 +7464,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=gpu_uuid")) {
 									return newMockExecutor("GPU-device00-uuid-temp-0000-000000000000", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -8325,7 +8325,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("", "nvidia-smi: command not found")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -8378,7 +8378,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 							func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 								if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-compute-apps=gpu_uuid,process_name")) {
 									return newMockExecutor("GPU-device00-uuid-temp-0000-000000000000, gpu_load_progress", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -8454,7 +8454,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 									return newMockExecutor("Drain State: Not Draining", "")
 								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("TARGET_FILE")) {
 									return newMockExecutor("nvidia-persist", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -8538,7 +8538,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -8669,7 +8669,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -8791,7 +8791,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -8927,7 +8927,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -9088,7 +9088,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -9260,7 +9260,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 									return newMockExecutor("", "")
 								} else if strings.Contains(url.RawQuery, "command=-r") {
 									return newMockExecutor("", "")
-								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+								} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 									return newMockExecutor("", "")
 								} else {
 									return newMockExecutor("", "this error should be reported")
@@ -9565,7 +9565,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						func(_ *rest.Config, method string, url *neturl.URL) (remotecommand.Executor, error) {
 							if strings.Contains(url.RawQuery, neturl.QueryEscape("--query-gpu=gpu_uuid")) {
 								return newMockExecutor("GPU-device00-uuid-temp-0000-000000000000", "")
-							} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+							} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 								return newMockExecutor("", "")
 							} else {
 								return newMockExecutor("", "this error should be reported")
@@ -9705,7 +9705,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 								return newMockExecutor("", "")
 							} else if strings.Contains(url.RawQuery, "command=-r") {
 								return newMockExecutor("", "")
-							} else if strings.Contains(url.RawQuery, neturl.QueryEscape("[n]vidia-persistenced")) {
+							} else if strings.Contains(url.RawQuery, neturl.QueryEscape("nvidia-persistenced.pid")) {
 								return newMockExecutor("", "")
 							} else {
 								return newMockExecutor("", "this error should be reported")
