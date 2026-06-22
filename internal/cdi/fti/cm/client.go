@@ -50,6 +50,12 @@ var (
 	cmRequestTimeout = 60 * time.Second
 )
 
+const (
+	resourceStatusOK       = "0"
+	resourceStatusWarning  = "1"
+	resourceStatusCritical = "2"
+)
+
 type FTIClient struct {
 	compositionServiceEndpoint string
 	tenantID                   string
@@ -167,7 +173,7 @@ func (f *FTIClient) AddResource(instance *v1alpha1.ComposableResource) (deviceID
 		return "", "", err
 	}
 
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
+	if !isHTTPSuccess(response.StatusCode) {
 		err = fmt.Errorf("failed to process CM scaleup request. http returned status: %d", response.StatusCode)
 		clientLog.Error(err, "failed to process CM scaleup request",
 			"ComposableResource", instance.Name,
@@ -244,7 +250,7 @@ func (f *FTIClient) RemoveResource(instance *v1alpha1.ComposableResource) error 
 		return err
 	}
 
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
+	if !isHTTPSuccess(response.StatusCode) {
 		err = fmt.Errorf("failed to process CM scaledown request. http returned status: %d", response.StatusCode)
 		clientLog.Error(err, "failed to process CM scaledown request",
 			"ComposableResource", instance.Name,
@@ -287,15 +293,15 @@ func (f *FTIClient) CheckResource(instance *v1alpha1.ComposableResource) error {
 				if device.DeviceUUID == instance.Status.DeviceID {
 					resourceOPStatus := string(device.Detail.ResourceOPStatus)
 					if len(resourceOPStatus) == 0 {
-						return fmt.Errorf("the target gpu '%s' has empty status in CM", instance.Status.DeviceID)
+						return fmt.Errorf("the target gpu '%s' on machine '%s' has empty status in CM", instance.Status.DeviceID, machineID)
 					}
 
-					if resourceOPStatus[:1] == "0" {
+					if resourceOPStatus[:1] == resourceStatusOK {
 						// The target device exists and has no error, return OK.
 						return nil
-					} else if resourceOPStatus[:1] == "1" {
+					} else if resourceOPStatus[:1] == resourceStatusWarning {
 						return fmt.Errorf("the target gpu '%s' is showing a Warning status in CM", instance.Status.DeviceID)
-					} else if resourceOPStatus[:1] == "2" {
+					} else if resourceOPStatus[:1] == resourceStatusCritical {
 						return fmt.Errorf("the target gpu '%s' is showing a Critical status in CM", instance.Status.DeviceID)
 					} else {
 						return fmt.Errorf("the target gpu '%s' has unknown status '%s' in CM", instance.Status.DeviceID, resourceOPStatus)
@@ -418,7 +424,7 @@ func (f *FTIClient) getMachineInfo(machineID string) (*fticmapi.Data, error) {
 		return nil, err
 	}
 
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
+	if !isHTTPSuccess(response.StatusCode) {
 		err = fmt.Errorf("failed to process CM get request. http returned status: %d", response.StatusCode)
 		clientLog.Error(err, "failed to process CM get request",
 			"machineID", machineID,
@@ -463,6 +469,10 @@ func checkAddingResources(machineData *fticmapi.Data, composableResourceList *v1
 	}
 
 	return specUUID, deviceCount, "", "", nil
+}
+
+func isHTTPSuccess(statusCode int) bool {
+	return statusCode >= 200 && statusCode < 300
 }
 
 func checkRemovingResources(machineData *fticmapi.Data, instance *v1alpha1.ComposableResource) (string, int, error) {

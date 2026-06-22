@@ -40,6 +40,7 @@ import (
 	"github.com/CoHDI/composable-resource-operator/internal/controller"
 	webhookcrov1alpha1 "github.com/CoHDI/composable-resource-operator/internal/webhook/v1alpha1"
 	gpuv1 "github.com/NVIDIA/gpu-operator/api/v1"
+	metal3v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -53,6 +54,7 @@ func init() {
 
 	utilruntime.Must(crov1alpha1.AddToScheme(scheme))
 	utilruntime.Must(gpuv1.AddToScheme(scheme))
+	utilruntime.Must(metal3v1alpha1.AddToScheme(scheme))
 	// +kubebuilder:scaffold:scheme
 }
 

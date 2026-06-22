@@ -46,11 +46,14 @@ type ComposableResourceReconciler struct {
 
 var composableResourceLog = ctrl.Log.WithName("composable_resource_controller")
 
+const defaultNvidiaGpuOperatorNamespace = "gpu-operator"
+
 func nvidiaGpuOperatorNamespace() string {
 	if ns := os.Getenv("NVIDIA_GPU_OPERATOR_NAMESPACE"); ns != "" {
 		return ns
 	}
-	return "gpu-operator"
+	composableResourceLog.Info("NVIDIA_GPU_OPERATOR_NAMESPACE not set, using default", "namespace", defaultNvidiaGpuOperatorNamespace)
+	return defaultNvidiaGpuOperatorNamespace
 }
 
 // +kubebuilder:rbac:groups=cro.hpsys.ibm.ie.com,resources=composableresources,verbs=get;list;watch;create;update;patch;delete
