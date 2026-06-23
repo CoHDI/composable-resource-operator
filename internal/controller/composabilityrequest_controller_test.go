@@ -146,6 +146,8 @@ func cleanAllComposabilityRequests() {
 }
 
 func cleanAllComposableResources() {
+	deleteAllNvidiaClusterPolicies()
+
 	composableResourceList := &crov1alpha1.ComposableResourceList{}
 	listOpts := []client.ListOption{client.InNamespace("")}
 	Expect(k8sClient.List(ctx, composableResourceList, listOpts...)).To(Succeed())
@@ -641,6 +643,153 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 						Code: http.StatusNotFound,
 					},
 				},
+			}),
+		)
+	})
+
+	Describe("When performGarbageCollection is triggered", func() {
+		type testcase struct {
+			requestName   string
+			requestSpec   *crov1alpha1.ComposabilityRequestSpec
+			requestStatus *crov1alpha1.ComposabilityRequestStatus
+			requestState  string
+
+			extraHandling func(requestName string)
+			setErrorMode  func()
+
+			expectedDeleted      bool
+			expectedGCDone       bool
+			expectedReconcileErr string
+		}
+
+		DescribeTable("", func(tc testcase) {
+			createComposabilityRequest(tc.requestName, tc.requestSpec, tc.requestStatus, tc.requestState)
+
+			Expect(callFunction(tc.setErrorMode)).NotTo(HaveOccurred())
+			Expect(callFunction(tc.extraHandling, tc.requestName)).NotTo(HaveOccurred())
+
+			composabilityRequest := &crov1alpha1.ComposabilityRequest{}
+			Expect(k8sClient.Get(ctx, types.NamespacedName{Name: tc.requestName}, composabilityRequest)).To(Succeed())
+
+			gcDone, err := controllerReconciler.performGarbageCollection(ctx, composabilityRequest)
+
+			if tc.expectedReconcileErr != "" {
+				Expect(err).To(HaveOccurred())
+				Expect(err.Error()).To(Equal(tc.expectedReconcileErr))
+			} else {
+				Expect(err).NotTo(HaveOccurred())
+				Expect(gcDone).To(Equal(tc.expectedGCDone))
+
+				updatedRequest := &crov1alpha1.ComposabilityRequest{}
+				getErr := k8sClient.Get(ctx, types.NamespacedName{Name: tc.requestName}, updatedRequest)
+
+				if tc.expectedDeleted {
+					Expect(getErr).NotTo(HaveOccurred())
+					Expect(updatedRequest.DeletionTimestamp).NotTo(BeNil())
+				} else {
+					Expect(getErr).NotTo(HaveOccurred())
+					Expect(updatedRequest.DeletionTimestamp).To(BeNil())
+				}
+			}
+
+			DeferCleanup(func() {
+				k8sClient.MockGet = nil
+				k8sClient.MockUpdate = nil
+				k8sClient.MockStatusUpdate = nil
+
+				Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
+
+				cleanAllComposabilityRequests()
+			})
+		},
+			Entry("should skip when TargetNode is empty", testcase{
+				requestName: "gc-empty-target-node",
+				requestSpec: func() *crov1alpha1.ComposabilityRequestSpec {
+					spec := baseComposabilityRequest.Spec.DeepCopy()
+					spec.Resource.TargetNode = ""
+					return spec
+				}(),
+				requestStatus: baseComposabilityRequest.Status.DeepCopy(),
+				requestState:  "Running",
+
+				expectedDeleted: false,
+				expectedGCDone:  false,
+			}),
+
+			Entry("should skip when target node exists", testcase{
+				requestName: "gc-node-exists",
+				requestSpec: func() *crov1alpha1.ComposabilityRequestSpec {
+					spec := baseComposabilityRequest.Spec.DeepCopy()
+					spec.Resource.TargetNode = worker0Name
+					return spec
+				}(),
+				requestStatus: baseComposabilityRequest.Status.DeepCopy(),
+				requestState:  "Running",
+
+				extraHandling: func(requestName string) {
+					Expect(k8sClient.Create(ctx, &corev1.Node{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: worker0Name,
+						},
+					})).To(Succeed())
+				},
+
+				expectedDeleted: false,
+				expectedGCDone:  false,
+			}),
+
+			Entry("should delete CR when target node is missing and deletion timestamp is absent", testcase{
+				requestName: "gc-node-missing-delete",
+				requestSpec: func() *crov1alpha1.ComposabilityRequestSpec {
+					spec := baseComposabilityRequest.Spec.DeepCopy()
+					spec.Resource.TargetNode = worker0Name
+					return spec
+				}(),
+				requestStatus: baseComposabilityRequest.Status.DeepCopy(),
+				requestState:  "Running",
+
+				expectedDeleted: true,
+				expectedGCDone:  true,
+			}),
+
+			Entry("should return false when target node is missing and deletion timestamp is already present", testcase{
+				requestName: "gc-already-deleting",
+				requestSpec: func() *crov1alpha1.ComposabilityRequestSpec {
+					spec := baseComposabilityRequest.Spec.DeepCopy()
+					spec.Resource.TargetNode = worker0Name
+					return spec
+				}(),
+				requestStatus: baseComposabilityRequest.Status.DeepCopy(),
+				requestState:  "Running",
+
+				extraHandling: func(requestName string) {
+					deleteComposabilityRequest(requestName)
+				},
+
+				expectedDeleted: true,
+				expectedGCDone:  false,
+			}),
+
+			Entry("should return error when CheckNodeExisted returns non-404 error", testcase{
+				requestName: "gc-check-node-error",
+				requestSpec: func() *crov1alpha1.ComposabilityRequestSpec {
+					spec := baseComposabilityRequest.Spec.DeepCopy()
+					spec.Resource.TargetNode = worker0Name
+					return spec
+				}(),
+				requestStatus: baseComposabilityRequest.Status.DeepCopy(),
+				requestState:  "Running",
+
+				setErrorMode: func() {
+					k8sClient.MockGet = func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+						if _, ok := obj.(*corev1.Node); ok && key.Name == worker0Name {
+							return errors.New("get node failed unexpectedly")
+						}
+						return k8sClient.Client.Get(ctx, key, obj, opts...)
+					}
+				},
+
+				expectedReconcileErr: "get node failed unexpectedly",
 			}),
 		)
 	})

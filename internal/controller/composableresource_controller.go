@@ -46,6 +46,16 @@ type ComposableResourceReconciler struct {
 
 var composableResourceLog = ctrl.Log.WithName("composable_resource_controller")
 
+const defaultNvidiaGpuOperatorNamespace = "gpu-operator"
+
+func nvidiaGpuOperatorNamespace() string {
+	if ns := os.Getenv("NVIDIA_GPU_OPERATOR_NAMESPACE"); ns != "" {
+		return ns
+	}
+	composableResourceLog.Info("NVIDIA_GPU_OPERATOR_NAMESPACE not set, using default", "namespace", defaultNvidiaGpuOperatorNamespace)
+	return defaultNvidiaGpuOperatorNamespace
+}
+
 // +kubebuilder:rbac:groups=cro.hpsys.ibm.ie.com,resources=composableresources,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=cro.hpsys.ibm.ie.com,resources=composableresources/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=cro.hpsys.ibm.ie.com,resources=composableresources/finalizers,verbs=update
@@ -63,7 +73,6 @@ var composableResourceLog = ctrl.Log.WithName("composable_resource_controller")
 // +kubebuilder:rbac:groups="",resources=secrets,verbs=get,resourceNames=credentials
 // +kubebuilder:rbac:groups=resource.k8s.io,resources=resourceslices,verbs=get;list;watch;update;patch
 // +kubebuilder:rbac:groups=resource.k8s.io,resources=resourceslices/status,verbs=get;update;patch
-// +kubebuilder:rbac:groups=nvidia.com,resources=clusterpolicies,verbs=get;list;watch
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -214,6 +223,10 @@ func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context,
 
 	deviceResourceType := os.Getenv("DEVICE_RESOURCE_TYPE")
 
+	if err := utils.EnsureGPUDriverExists(ctx, r.Client, r.Clientset, r.RestConfig, resource.Spec.TargetNode); err != nil {
+		return r.requeueOnErr(resource, err, "failed to ensure nvidia driver exists on target node", "TargetNode", resource.Spec.TargetNode, "composableResource", resource.Name)
+	}
+
 	if resource.Status.DeviceID == "" {
 		deviceID, CDIDeviceID, err := adapter.CDIProvider.AddResource(resource)
 		if err != nil {
@@ -241,14 +254,14 @@ func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context,
 			composableResourceLog.Error(err, "failed to check gpu loads in TargetNode", "TargetNode", resource.Spec.TargetNode, "composableResource", resource.Name)
 		}
 
-		if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-gpu-operator", "nvidia-device-plugin-daemonset"); err != nil {
+		if err := utils.RestartDaemonset(ctx, r.Client, nvidiaGpuOperatorNamespace(), "nvidia-device-plugin-daemonset"); err != nil {
 			composableResourceLog.Error(err, "failed to restart nvidia-device-plugin-daemonset", "composableResource", resource.Name)
 			resource.Status.Error = err.Error()
 			if err := r.Status().Update(ctx, resource); err != nil {
 				return r.requeueOnErr(resource, err, "failed to update composableResource", "composableResource", resource.Name)
 			}
 		}
-		if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-gpu-operator", "nvidia-dcgm"); err != nil {
+		if err := utils.RestartDaemonset(ctx, r.Client, nvidiaGpuOperatorNamespace(), "nvidia-dcgm"); err != nil {
 			composableResourceLog.Error(err, "failed to restart nvidia-dcgm", "composableResource", resource.Name)
 			resource.Status.Error = err.Error()
 			if err := r.Status().Update(ctx, resource); err != nil {
@@ -263,7 +276,7 @@ func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context,
 				return r.requeueOnErr(resource, err, "failed to update composableResource", "composableResource", resource.Name)
 			}
 		}
-		if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-dra-driver-gpu", "nvidia-dra-driver-gpu-kubelet-plugin"); err != nil {
+		if err := utils.TerminateKubeletPluginPodOnNode(ctx, r.Clientset, resource.Spec.TargetNode); err != nil {
 			composableResourceLog.Error(err, "failed to restart nvidia-dra-driver-gpu-kubelet-plugin", "composableResource", resource.Name)
 			resource.Status.Error = err.Error()
 			if err := r.Status().Update(ctx, resource); err != nil {
@@ -365,14 +378,14 @@ func (r *ComposableResourceReconciler) handleDetachingState(ctx context.Context,
 
 		// Restart the device plugin / DRA daemonsets to reflect the change.
 		if deviceResourceType == "DEVICE_PLUGIN" {
-			if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-gpu-operator", "nvidia-device-plugin-daemonset"); err != nil {
+			if err := utils.RestartDaemonset(ctx, r.Client, nvidiaGpuOperatorNamespace(), "nvidia-device-plugin-daemonset"); err != nil {
 				return r.requeueOnErr(resource, err, "failed to restart nvidia-device-plugin-daemonset", "composableResource", resource.Name)
 			}
-			if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-gpu-operator", "nvidia-dcgm"); err != nil {
+			if err := utils.RestartDaemonset(ctx, r.Client, nvidiaGpuOperatorNamespace(), "nvidia-dcgm"); err != nil {
 				return r.requeueOnErr(resource, err, "failed to restart nvidia-dcgm", "composableResource", resource.Name)
 			}
 		} else {
-			if err := utils.RestartDaemonset(ctx, r.Client, "nvidia-dra-driver-gpu", "nvidia-dra-driver-gpu-kubelet-plugin"); err != nil {
+			if err := utils.TerminateKubeletPluginPodOnNode(ctx, r.Clientset, resource.Spec.TargetNode); err != nil {
 				return r.requeueOnErr(resource, err, "failed to restart nvidia-dra-driver-gpu-kubelet-plugin", "composableResource", resource.Name)
 			}
 		}

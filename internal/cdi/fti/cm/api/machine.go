@@ -77,7 +77,7 @@ type DeviceDetail struct {
 	FabricGID        string               `json:"fabr_gid"`
 	ResourceType     string               `json:"res_type"`
 	ResourceName     string               `json:"res_name"`
-	ResourceStatus   string               `json:"res_status"`
+	ResourceStatus   int                  `json:"res_status"`
 	ResourceOPStatus string               `json:"res_op_status"`
 	ResourceSpec     []DeviceResourceSpec `json:"resspecs"`
 	TenantID         string               `json:"tenant_uuid"`
