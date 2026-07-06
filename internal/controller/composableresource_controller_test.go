@@ -721,7 +721,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 			"composable-resource-operator-system",
 			"openshift-machine-api",
 			"nvidia-gpu-operator",
-			"nvidia-dra-driver-gpu",
+			"dra-driver-nvidia-gpu",
 		}
 		for _, nsName := range namespacesToCreate {
 			ns := &corev1.Namespace{}
@@ -1595,7 +1595,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						},
 					)).NotTo(HaveOccurred())
 					Expect(k8sClient.DeleteAllOf(ctx, &corev1.Pod{},
-						client.InNamespace("nvidia-dra-driver-gpu"),
+						client.InNamespace("dra-driver-nvidia-gpu"),
 						&client.DeleteAllOfOptions{
 							DeleteOptions: client.DeleteOptions{
 								GracePeriodSeconds: ptr.To(int64(0)),
@@ -1603,7 +1603,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						},
 					)).NotTo(HaveOccurred())
 
-					Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("nvidia-dra-driver-gpu"))).NotTo(HaveOccurred())
+					Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("dra-driver-nvidia-gpu"))).NotTo(HaveOccurred())
 
 					Expect(k8sClient.DeleteAllOf(ctx, &resourcev1.ResourceSlice{})).NotTo(HaveOccurred())
 
@@ -2582,16 +2582,16 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 						draDaemonset := &appsv1.DaemonSet{
 							ObjectMeta: metav1.ObjectMeta{
-								Name:      "nvidia-dra-driver-gpu-kubelet-plugin",
-								Namespace: "nvidia-dra-driver-gpu",
+								Name:      "dra-driver-nvidia-gpu-kubelet-plugin",
+								Namespace: "dra-driver-nvidia-gpu",
 							},
 							Spec: appsv1.DaemonSetSpec{
 								Selector: &metav1.LabelSelector{
-									MatchLabels: map[string]string{"app": "nvidia-dra-driver-gpu-kubelet-plugin"},
+									MatchLabels: map[string]string{"app": "dra-driver-nvidia-gpu-kubelet-plugin"},
 								},
 								Template: corev1.PodTemplateSpec{
 									ObjectMeta: metav1.ObjectMeta{
-										Labels: map[string]string{"app": "nvidia-dra-driver-gpu-kubelet-plugin"},
+										Labels: map[string]string{"app": "dra-driver-nvidia-gpu-kubelet-plugin"},
 									},
 									Spec: corev1.PodSpec{
 										Containers: []corev1.Container{
@@ -2617,7 +2617,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						return composableResourceStatus
 					}(),
 				}),
-				Entry("should wait when nvidia-dra-driver-gpu-kubelet-plugin Daemonset can not be found in cluster", testcase{
+				Entry("should wait when dra-driver-nvidia-gpu-kubelet-plugin Daemonset can not be found in cluster", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
 					cluster_uuid: "cluster0-uuid-temp-0000-000000000001",
 
@@ -2796,16 +2796,16 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 						draDaemonset := &appsv1.DaemonSet{
 							ObjectMeta: metav1.ObjectMeta{
-								Name:      "nvidia-dra-driver-gpu-kubelet-plugin",
-								Namespace: "nvidia-dra-driver-gpu",
+								Name:      "dra-driver-nvidia-gpu-kubelet-plugin",
+								Namespace: "dra-driver-nvidia-gpu",
 							},
 							Spec: appsv1.DaemonSetSpec{
 								Selector: &metav1.LabelSelector{
-									MatchLabels: map[string]string{"app": "nvidia-dra-driver-gpu-kubelet-plugin"},
+									MatchLabels: map[string]string{"app": "dra-driver-nvidia-gpu-kubelet-plugin"},
 								},
 								Template: corev1.PodTemplateSpec{
 									ObjectMeta: metav1.ObjectMeta{
-										Labels: map[string]string{"app": "nvidia-dra-driver-gpu-kubelet-plugin"},
+										Labels: map[string]string{"app": "dra-driver-nvidia-gpu-kubelet-plugin"},
 									},
 									Spec: corev1.PodSpec{
 										Containers: []corev1.Container{
@@ -2918,16 +2918,16 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 						draDaemonset := &appsv1.DaemonSet{
 							ObjectMeta: metav1.ObjectMeta{
-								Name:      "nvidia-dra-driver-gpu-kubelet-plugin",
-								Namespace: "nvidia-dra-driver-gpu",
+								Name:      "dra-driver-nvidia-gpu-kubelet-plugin",
+								Namespace: "dra-driver-nvidia-gpu",
 							},
 							Spec: appsv1.DaemonSetSpec{
 								Selector: &metav1.LabelSelector{
-									MatchLabels: map[string]string{"app": "nvidia-dra-driver-gpu-kubelet-plugin"},
+									MatchLabels: map[string]string{"app": "dra-driver-nvidia-gpu-kubelet-plugin"},
 								},
 								Template: corev1.PodTemplateSpec{
 									ObjectMeta: metav1.ObjectMeta{
-										Labels: map[string]string{"app": "nvidia-dra-driver-gpu-kubelet-plugin"},
+										Labels: map[string]string{"app": "dra-driver-nvidia-gpu-kubelet-plugin"},
 										Annotations: map[string]string{
 											"kubectl.kubernetes.io/restartedAt": time.Now().Format(time.RFC3339),
 										},
@@ -3043,16 +3043,16 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 						draDaemonset := &appsv1.DaemonSet{
 							ObjectMeta: metav1.ObjectMeta{
-								Name:      "nvidia-dra-driver-gpu-kubelet-plugin",
-								Namespace: "nvidia-dra-driver-gpu",
+								Name:      "dra-driver-nvidia-gpu-kubelet-plugin",
+								Namespace: "dra-driver-nvidia-gpu",
 							},
 							Spec: appsv1.DaemonSetSpec{
 								Selector: &metav1.LabelSelector{
-									MatchLabels: map[string]string{"app": "nvidia-dra-driver-gpu-kubelet-plugin"},
+									MatchLabels: map[string]string{"app": "dra-driver-nvidia-gpu-kubelet-plugin"},
 								},
 								Template: corev1.PodTemplateSpec{
 									ObjectMeta: metav1.ObjectMeta{
-										Labels: map[string]string{"app": "nvidia-dra-driver-gpu-kubelet-plugin"},
+										Labels: map[string]string{"app": "dra-driver-nvidia-gpu-kubelet-plugin"},
 										Annotations: map[string]string{
 											"kubectl.kubernetes.io/restartedAt": time.Now().Format(time.RFC3339),
 										},
@@ -3178,16 +3178,16 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 						draDaemonset := &appsv1.DaemonSet{
 							ObjectMeta: metav1.ObjectMeta{
-								Name:      "nvidia-dra-driver-gpu-kubelet-plugin",
-								Namespace: "nvidia-dra-driver-gpu",
+								Name:      "dra-driver-nvidia-gpu-kubelet-plugin",
+								Namespace: "dra-driver-nvidia-gpu",
 							},
 							Spec: appsv1.DaemonSetSpec{
 								Selector: &metav1.LabelSelector{
-									MatchLabels: map[string]string{"app": "nvidia-dra-driver-gpu-kubelet-plugin"},
+									MatchLabels: map[string]string{"app": "dra-driver-nvidia-gpu-kubelet-plugin"},
 								},
 								Template: corev1.PodTemplateSpec{
 									ObjectMeta: metav1.ObjectMeta{
-										Labels: map[string]string{"app": "nvidia-dra-driver-gpu-kubelet-plugin"},
+										Labels: map[string]string{"app": "dra-driver-nvidia-gpu-kubelet-plugin"},
 										Annotations: map[string]string{
 											"kubectl.kubernetes.io/restartedAt": "error",
 										},
@@ -3206,7 +3206,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						Expect(k8sClient.Create(ctx, draDaemonset)).NotTo(HaveOccurred())
 
 						// Update DaemonSet status
-						Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "nvidia-dra-driver-gpu-kubelet-plugin", Namespace: "nvidia-dra-driver-gpu"}, draDaemonset)).NotTo(HaveOccurred())
+						Expect(k8sClient.Get(ctx, types.NamespacedName{Name: "dra-driver-nvidia-gpu-kubelet-plugin", Namespace: "dra-driver-nvidia-gpu"}, draDaemonset)).NotTo(HaveOccurred())
 						draDaemonset.Status.DesiredNumberScheduled = 1
 						draDaemonset.Status.NumberReady = 1
 						draDaemonset.Status.CurrentNumberScheduled = 1
@@ -3309,16 +3309,16 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 						draDaemonset := &appsv1.DaemonSet{
 							ObjectMeta: metav1.ObjectMeta{
-								Name:      "nvidia-dra-driver-gpu-kubelet-plugin",
-								Namespace: "nvidia-dra-driver-gpu",
+								Name:      "dra-driver-nvidia-gpu-kubelet-plugin",
+								Namespace: "dra-driver-nvidia-gpu",
 							},
 							Spec: appsv1.DaemonSetSpec{
 								Selector: &metav1.LabelSelector{
-									MatchLabels: map[string]string{"app": "nvidia-dra-driver-gpu-kubelet-plugin"},
+									MatchLabels: map[string]string{"app": "dra-driver-nvidia-gpu-kubelet-plugin"},
 								},
 								Template: corev1.PodTemplateSpec{
 									ObjectMeta: metav1.ObjectMeta{
-										Labels: map[string]string{"app": "nvidia-dra-driver-gpu-kubelet-plugin"},
+										Labels: map[string]string{"app": "dra-driver-nvidia-gpu-kubelet-plugin"},
 									},
 									Spec: corev1.PodSpec{
 										Containers: []corev1.Container{
@@ -3502,16 +3502,16 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 						draDaemonset := &appsv1.DaemonSet{
 							ObjectMeta: metav1.ObjectMeta{
-								Name:      "nvidia-dra-driver-gpu-kubelet-plugin",
-								Namespace: "nvidia-dra-driver-gpu",
+								Name:      "dra-driver-nvidia-gpu-kubelet-plugin",
+								Namespace: "dra-driver-nvidia-gpu",
 							},
 							Spec: appsv1.DaemonSetSpec{
 								Selector: &metav1.LabelSelector{
-									MatchLabels: map[string]string{"app": "nvidia-dra-driver-gpu-kubelet-plugin"},
+									MatchLabels: map[string]string{"app": "dra-driver-nvidia-gpu-kubelet-plugin"},
 								},
 								Template: corev1.PodTemplateSpec{
 									ObjectMeta: metav1.ObjectMeta{
-										Labels: map[string]string{"app": "nvidia-dra-driver-gpu-kubelet-plugin"},
+										Labels: map[string]string{"app": "dra-driver-nvidia-gpu-kubelet-plugin"},
 									},
 									Spec: corev1.PodSpec{
 										Containers: []corev1.Container{
@@ -3587,7 +3587,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					},
 				)).NotTo(HaveOccurred())
 				Expect(k8sClient.DeleteAllOf(ctx, &corev1.Pod{},
-					client.InNamespace("nvidia-dra-driver-gpu"),
+					client.InNamespace("dra-driver-nvidia-gpu"),
 					&client.DeleteAllOfOptions{
 						DeleteOptions: client.DeleteOptions{
 							GracePeriodSeconds: ptr.To(int64(0)),
@@ -3666,7 +3666,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					Expect(k8sClient.DeleteAllOf(ctx, &metal3v1alpha1.BareMetalHost{}, client.InNamespace("openshift-machine-api"))).NotTo(HaveOccurred())
 					Expect(k8sClient.DeleteAllOf(ctx, &corev1.Secret{}, client.InNamespace("composable-resource-operator-system"))).NotTo(HaveOccurred())
 
-					Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("nvidia-dra-driver-gpu"))).NotTo(HaveOccurred())
+					Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("dra-driver-nvidia-gpu"))).NotTo(HaveOccurred())
 
 					cleanAllComposableResources()
 				})
@@ -4281,7 +4281,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						},
 					)).NotTo(HaveOccurred())
 					Expect(k8sClient.DeleteAllOf(ctx, &corev1.Pod{},
-						client.InNamespace("nvidia-dra-driver-gpu"),
+						client.InNamespace("dra-driver-nvidia-gpu"),
 						&client.DeleteAllOfOptions{
 							DeleteOptions: client.DeleteOptions{
 								GracePeriodSeconds: ptr.To(int64(0)),
@@ -4289,7 +4289,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						},
 					)).NotTo(HaveOccurred())
 
-					Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("nvidia-dra-driver-gpu"))).NotTo(HaveOccurred())
+					Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("dra-driver-nvidia-gpu"))).NotTo(HaveOccurred())
 
 					Expect(k8sClient.DeleteAllOf(ctx, &resourcev1.ResourceSlice{})).NotTo(HaveOccurred())
 
@@ -4625,10 +4625,10 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 						draPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
-								Name:      "nvidia-dra-driver-gpu-kubelet-plugin-test",
-								Namespace: "nvidia-dra-driver-gpu",
+								Name:      "dra-driver-nvidia-gpu-kubelet-plugin-test",
+								Namespace: "dra-driver-nvidia-gpu",
 								Labels: map[string]string{
-									"app.kubernetes.io/name": "nvidia-dra-driver-gpu",
+									"app.kubernetes.io/name": "dra-driver-nvidia-gpu",
 								},
 							},
 							Spec: corev1.PodSpec{
@@ -4741,10 +4741,10 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 						draPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
-								Name:      "nvidia-dra-driver-gpu-kubelet-plugin-test",
-								Namespace: "nvidia-dra-driver-gpu",
+								Name:      "dra-driver-nvidia-gpu-kubelet-plugin-test",
+								Namespace: "dra-driver-nvidia-gpu",
 								Labels: map[string]string{
-									"app.kubernetes.io/name": "nvidia-dra-driver-gpu",
+									"app.kubernetes.io/name": "dra-driver-nvidia-gpu",
 								},
 							},
 							Spec: corev1.PodSpec{
@@ -4896,10 +4896,10 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 						draPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
-								Name:      "nvidia-dra-driver-gpu-kubelet-plugin-test",
-								Namespace: "nvidia-dra-driver-gpu",
+								Name:      "dra-driver-nvidia-gpu-kubelet-plugin-test",
+								Namespace: "dra-driver-nvidia-gpu",
 								Labels: map[string]string{
-									"app.kubernetes.io/name": "nvidia-dra-driver-gpu",
+									"app.kubernetes.io/name": "dra-driver-nvidia-gpu",
 								},
 							},
 							Spec: corev1.PodSpec{
@@ -5064,10 +5064,10 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 						draPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
-								Name:      "nvidia-dra-driver-gpu-kubelet-plugin-test",
-								Namespace: "nvidia-dra-driver-gpu",
+								Name:      "dra-driver-nvidia-gpu-kubelet-plugin-test",
+								Namespace: "dra-driver-nvidia-gpu",
 								Labels: map[string]string{
-									"app.kubernetes.io/name": "nvidia-dra-driver-gpu",
+									"app.kubernetes.io/name": "dra-driver-nvidia-gpu",
 								},
 							},
 							Spec: corev1.PodSpec{
@@ -5224,10 +5224,10 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 						draPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
-								Name:      "nvidia-dra-driver-gpu-kubelet-plugin-test",
-								Namespace: "nvidia-dra-driver-gpu",
+								Name:      "dra-driver-nvidia-gpu-kubelet-plugin-test",
+								Namespace: "dra-driver-nvidia-gpu",
 								Labels: map[string]string{
-									"app.kubernetes.io/name": "nvidia-dra-driver-gpu",
+									"app.kubernetes.io/name": "dra-driver-nvidia-gpu",
 								},
 							},
 							Spec: corev1.PodSpec{
@@ -5401,10 +5401,10 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 						draPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
-								Name:      "nvidia-dra-driver-gpu-kubelet-plugin-test",
-								Namespace: "nvidia-dra-driver-gpu",
+								Name:      "dra-driver-nvidia-gpu-kubelet-plugin-test",
+								Namespace: "dra-driver-nvidia-gpu",
 								Labels: map[string]string{
-									"app.kubernetes.io/name": "nvidia-dra-driver-gpu",
+									"app.kubernetes.io/name": "dra-driver-nvidia-gpu",
 								},
 							},
 							Spec: corev1.PodSpec{
@@ -5572,10 +5572,10 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 						draPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
-								Name:      "nvidia-dra-driver-gpu-kubelet-plugin-test",
-								Namespace: "nvidia-dra-driver-gpu",
+								Name:      "dra-driver-nvidia-gpu-kubelet-plugin-test",
+								Namespace: "dra-driver-nvidia-gpu",
 								Labels: map[string]string{
-									"app.kubernetes.io/name": "nvidia-dra-driver-gpu",
+									"app.kubernetes.io/name": "dra-driver-nvidia-gpu",
 								},
 							},
 							Spec: corev1.PodSpec{
@@ -5760,10 +5760,10 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 						draPod := &corev1.Pod{
 							ObjectMeta: metav1.ObjectMeta{
-								Name:      "nvidia-dra-driver-gpu-kubelet-plugin-test",
-								Namespace: "nvidia-dra-driver-gpu",
+								Name:      "dra-driver-nvidia-gpu-kubelet-plugin-test",
+								Namespace: "dra-driver-nvidia-gpu",
 								Labels: map[string]string{
-									"app.kubernetes.io/name": "nvidia-dra-driver-gpu",
+									"app.kubernetes.io/name": "dra-driver-nvidia-gpu",
 								},
 							},
 							Spec: corev1.PodSpec{
@@ -5822,16 +5822,16 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 						draDaemonset := &appsv1.DaemonSet{
 							ObjectMeta: metav1.ObjectMeta{
-								Name:      "nvidia-dra-driver-gpu-kubelet-plugin",
-								Namespace: "nvidia-dra-driver-gpu",
+								Name:      "dra-driver-nvidia-gpu-kubelet-plugin",
+								Namespace: "dra-driver-nvidia-gpu",
 							},
 							Spec: appsv1.DaemonSetSpec{
 								Selector: &metav1.LabelSelector{
-									MatchLabels: map[string]string{"app": "nvidia-dra-driver-gpu-kubelet-plugin"},
+									MatchLabels: map[string]string{"app": "dra-driver-nvidia-gpu-kubelet-plugin"},
 								},
 								Template: corev1.PodTemplateSpec{
 									ObjectMeta: metav1.ObjectMeta{
-										Labels: map[string]string{"app": "nvidia-dra-driver-gpu-kubelet-plugin"},
+										Labels: map[string]string{"app": "dra-driver-nvidia-gpu-kubelet-plugin"},
 									},
 									Spec: corev1.PodSpec{
 										Containers: []corev1.Container{
@@ -6102,7 +6102,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						},
 					)).NotTo(HaveOccurred())
 					Expect(k8sClient.DeleteAllOf(ctx, &corev1.Pod{},
-						client.InNamespace("nvidia-dra-driver-gpu"),
+						client.InNamespace("dra-driver-nvidia-gpu"),
 						&client.DeleteAllOfOptions{
 							DeleteOptions: client.DeleteOptions{
 								GracePeriodSeconds: ptr.To(int64(0)),
@@ -6110,7 +6110,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						},
 					)).NotTo(HaveOccurred())
 
-					Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("nvidia-dra-driver-gpu"))).NotTo(HaveOccurred())
+					Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("dra-driver-nvidia-gpu"))).NotTo(HaveOccurred())
 					Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("nvidia-gpu-operator"))).NotTo(HaveOccurred())
 
 					Expect(k8sClient.DeleteAllOf(ctx, &resourcev1.ResourceSlice{})).NotTo(HaveOccurred())
@@ -6925,16 +6925,16 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 						draDaemonset := &appsv1.DaemonSet{
 							ObjectMeta: metav1.ObjectMeta{
-								Name:      "nvidia-dra-driver-gpu-kubelet-plugin",
-								Namespace: "nvidia-dra-driver-gpu",
+								Name:      "dra-driver-nvidia-gpu-kubelet-plugin",
+								Namespace: "dra-driver-nvidia-gpu",
 							},
 							Spec: appsv1.DaemonSetSpec{
 								Selector: &metav1.LabelSelector{
-									MatchLabels: map[string]string{"app": "nvidia-dra-driver-gpu-kubelet-plugin"},
+									MatchLabels: map[string]string{"app": "dra-driver-nvidia-gpu-kubelet-plugin"},
 								},
 								Template: corev1.PodTemplateSpec{
 									ObjectMeta: metav1.ObjectMeta{
-										Labels: map[string]string{"app": "nvidia-dra-driver-gpu-kubelet-plugin"},
+										Labels: map[string]string{"app": "dra-driver-nvidia-gpu-kubelet-plugin"},
 									},
 									Spec: corev1.PodSpec{
 										Containers: []corev1.Container{
@@ -7097,16 +7097,16 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 						draDaemonset := &appsv1.DaemonSet{
 							ObjectMeta: metav1.ObjectMeta{
-								Name:      "nvidia-dra-driver-gpu-kubelet-plugin",
-								Namespace: "nvidia-dra-driver-gpu",
+								Name:      "dra-driver-nvidia-gpu-kubelet-plugin",
+								Namespace: "dra-driver-nvidia-gpu",
 							},
 							Spec: appsv1.DaemonSetSpec{
 								Selector: &metav1.LabelSelector{
-									MatchLabels: map[string]string{"app": "nvidia-dra-driver-gpu-kubelet-plugin"},
+									MatchLabels: map[string]string{"app": "dra-driver-nvidia-gpu-kubelet-plugin"},
 								},
 								Template: corev1.PodTemplateSpec{
 									ObjectMeta: metav1.ObjectMeta{
-										Labels: map[string]string{"app": "nvidia-dra-driver-gpu-kubelet-plugin"},
+										Labels: map[string]string{"app": "dra-driver-nvidia-gpu-kubelet-plugin"},
 									},
 									Spec: corev1.PodSpec{
 										Containers: []corev1.Container{
@@ -7263,16 +7263,16 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 						draDaemonset := &appsv1.DaemonSet{
 							ObjectMeta: metav1.ObjectMeta{
-								Name:      "nvidia-dra-driver-gpu-kubelet-plugin",
-								Namespace: "nvidia-dra-driver-gpu",
+								Name:      "dra-driver-nvidia-gpu-kubelet-plugin",
+								Namespace: "dra-driver-nvidia-gpu",
 							},
 							Spec: appsv1.DaemonSetSpec{
 								Selector: &metav1.LabelSelector{
-									MatchLabels: map[string]string{"app": "nvidia-dra-driver-gpu-kubelet-plugin"},
+									MatchLabels: map[string]string{"app": "dra-driver-nvidia-gpu-kubelet-plugin"},
 								},
 								Template: corev1.PodTemplateSpec{
 									ObjectMeta: metav1.ObjectMeta{
-										Labels: map[string]string{"app": "nvidia-dra-driver-gpu-kubelet-plugin"},
+										Labels: map[string]string{"app": "dra-driver-nvidia-gpu-kubelet-plugin"},
 									},
 									Spec: corev1.PodSpec{
 										Containers: []corev1.Container{
@@ -7435,16 +7435,16 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 						draDaemonset := &appsv1.DaemonSet{
 							ObjectMeta: metav1.ObjectMeta{
-								Name:      "nvidia-dra-driver-gpu-kubelet-plugin",
-								Namespace: "nvidia-dra-driver-gpu",
+								Name:      "dra-driver-nvidia-gpu-kubelet-plugin",
+								Namespace: "dra-driver-nvidia-gpu",
 							},
 							Spec: appsv1.DaemonSetSpec{
 								Selector: &metav1.LabelSelector{
-									MatchLabels: map[string]string{"app": "nvidia-dra-driver-gpu-kubelet-plugin"},
+									MatchLabels: map[string]string{"app": "dra-driver-nvidia-gpu-kubelet-plugin"},
 								},
 								Template: corev1.PodTemplateSpec{
 									ObjectMeta: metav1.ObjectMeta{
-										Labels: map[string]string{"app": "nvidia-dra-driver-gpu-kubelet-plugin"},
+										Labels: map[string]string{"app": "dra-driver-nvidia-gpu-kubelet-plugin"},
 									},
 									Spec: corev1.PodSpec{
 										Containers: []corev1.Container{
@@ -7493,7 +7493,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					},
 				)).NotTo(HaveOccurred())
 				Expect(k8sClient.DeleteAllOf(ctx, &corev1.Pod{},
-					client.InNamespace("nvidia-dra-driver-gpu"),
+					client.InNamespace("dra-driver-nvidia-gpu"),
 					&client.DeleteAllOfOptions{
 						DeleteOptions: client.DeleteOptions{
 							GracePeriodSeconds: ptr.To(int64(0)),
@@ -7572,7 +7572,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					Expect(k8sClient.DeleteAllOf(ctx, &metal3v1alpha1.BareMetalHost{}, client.InNamespace("openshift-machine-api"))).NotTo(HaveOccurred())
 					Expect(k8sClient.DeleteAllOf(ctx, &corev1.Secret{}, client.InNamespace("composable-resource-operator-system"))).NotTo(HaveOccurred())
 
-					Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("nvidia-dra-driver-gpu"))).NotTo(HaveOccurred())
+					Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("dra-driver-nvidia-gpu"))).NotTo(HaveOccurred())
 
 					cleanAllComposableResources()
 				})
@@ -8265,7 +8265,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						},
 					)).NotTo(HaveOccurred())
 					Expect(k8sClient.DeleteAllOf(ctx, &corev1.Pod{},
-						client.InNamespace("nvidia-dra-driver-gpu"),
+						client.InNamespace("dra-driver-nvidia-gpu"),
 						&client.DeleteAllOfOptions{
 							DeleteOptions: client.DeleteOptions{
 								GracePeriodSeconds: ptr.To(int64(0)),
@@ -8273,7 +8273,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						},
 					)).NotTo(HaveOccurred())
 
-					Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("nvidia-dra-driver-gpu"))).NotTo(HaveOccurred())
+					Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("dra-driver-nvidia-gpu"))).NotTo(HaveOccurred())
 					Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("nvidia-gpu-operator"))).NotTo(HaveOccurred())
 
 					cleanAllComposableResources()
@@ -9404,7 +9404,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					},
 				)).NotTo(HaveOccurred())
 				Expect(k8sClient.DeleteAllOf(ctx, &corev1.Pod{},
-					client.InNamespace("nvidia-dra-driver-gpu"),
+					client.InNamespace("dra-driver-nvidia-gpu"),
 					&client.DeleteAllOfOptions{
 						DeleteOptions: client.DeleteOptions{
 							GracePeriodSeconds: ptr.To(int64(0)),
@@ -9412,7 +9412,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					},
 				)).NotTo(HaveOccurred())
 
-				Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("nvidia-dra-driver-gpu"))).NotTo(HaveOccurred())
+				Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("dra-driver-nvidia-gpu"))).NotTo(HaveOccurred())
 
 				Expect(k8sClient.DeleteAllOf(ctx, &resourcev1.ResourceSlice{})).NotTo(HaveOccurred())
 
@@ -9533,16 +9533,16 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 					draDaemonset := &appsv1.DaemonSet{
 						ObjectMeta: metav1.ObjectMeta{
-							Name:      "nvidia-dra-driver-gpu-kubelet-plugin",
-							Namespace: "nvidia-dra-driver-gpu",
+							Name:      "dra-driver-nvidia-gpu-kubelet-plugin",
+							Namespace: "dra-driver-nvidia-gpu",
 						},
 						Spec: appsv1.DaemonSetSpec{
 							Selector: &metav1.LabelSelector{
-								MatchLabels: map[string]string{"app": "nvidia-dra-driver-gpu-kubelet-plugin"},
+								MatchLabels: map[string]string{"app": "dra-driver-nvidia-gpu-kubelet-plugin"},
 							},
 							Template: corev1.PodTemplateSpec{
 								ObjectMeta: metav1.ObjectMeta{
-									Labels: map[string]string{"app": "nvidia-dra-driver-gpu-kubelet-plugin"},
+									Labels: map[string]string{"app": "dra-driver-nvidia-gpu-kubelet-plugin"},
 									Annotations: map[string]string{
 										"kubectl.kubernetes.io/restartedAt": time.Now().Format(time.RFC3339),
 									},
@@ -9614,10 +9614,10 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 					draPod := &corev1.Pod{
 						ObjectMeta: metav1.ObjectMeta{
-							Name:      "nvidia-dra-driver-gpu-kubelet-plugin-test",
-							Namespace: "nvidia-dra-driver-gpu",
+							Name:      "dra-driver-nvidia-gpu-kubelet-plugin-test",
+							Namespace: "dra-driver-nvidia-gpu",
 							Labels: map[string]string{
-								"app.kubernetes.io/name": "nvidia-dra-driver-gpu",
+								"app.kubernetes.io/name": "dra-driver-nvidia-gpu",
 							},
 						},
 						Spec: corev1.PodSpec{

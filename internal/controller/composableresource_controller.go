@@ -277,7 +277,7 @@ func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context,
 			}
 		}
 		if err := utils.TerminateKubeletPluginPodOnNode(ctx, r.Clientset, resource.Spec.TargetNode); err != nil {
-			composableResourceLog.Error(err, "failed to restart nvidia-dra-driver-gpu-kubelet-plugin", "composableResource", resource.Name)
+			composableResourceLog.Error(err, "failed to restart dra-driver-nvidia-gpu-kubelet-plugin", "composableResource", resource.Name)
 			resource.Status.Error = err.Error()
 			if err := r.Status().Update(ctx, resource); err != nil {
 				return r.requeueOnErr(resource, err, "failed to update composableResource", "composableResource", resource.Name)
@@ -386,7 +386,7 @@ func (r *ComposableResourceReconciler) handleDetachingState(ctx context.Context,
 			}
 		} else {
 			if err := utils.TerminateKubeletPluginPodOnNode(ctx, r.Clientset, resource.Spec.TargetNode); err != nil {
-				return r.requeueOnErr(resource, err, "failed to restart nvidia-dra-driver-gpu-kubelet-plugin", "composableResource", resource.Name)
+				return r.requeueOnErr(resource, err, "failed to restart dra-driver-nvidia-gpu-kubelet-plugin", "composableResource", resource.Name)
 			}
 		}
 
