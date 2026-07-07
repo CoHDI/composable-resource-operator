@@ -146,7 +146,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 				"composable-resource-operator-system",
 				"openshift-machine-api",
 				"nvidia-gpu-operator",
-				"nvidia-dra-driver-gpu",
+				"dra-driver-nvidia-gpu",
 			}
 			for _, nsName := range namespacesToCreate {
 				ns := &corev1.Namespace{}
@@ -257,7 +257,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 					},
 				)).NotTo(HaveOccurred())
 				Expect(k8sClient.DeleteAllOf(ctx, &corev1.Pod{},
-					client.InNamespace("nvidia-dra-driver-gpu"),
+					client.InNamespace("dra-driver-nvidia-gpu"),
 					&client.DeleteAllOfOptions{
 						DeleteOptions: client.DeleteOptions{
 							GracePeriodSeconds: ptr.To(int64(0)),
@@ -266,7 +266,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 				)).NotTo(HaveOccurred())
 
 				Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("gpu-operator"))).NotTo(HaveOccurred())
-				Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("nvidia-dra-driver-gpu"))).NotTo(HaveOccurred())
+				Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("dra-driver-nvidia-gpu"))).NotTo(HaveOccurred())
 
 				Expect(k8sClient.DeleteAllOf(ctx, &resourcev1.ResourceSlice{})).NotTo(HaveOccurred())
 

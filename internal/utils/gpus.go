@@ -42,7 +42,12 @@ import (
 
 var gpusLog = ctrl.Log.WithName("utils_gpus")
 
-const nvidiaDriverRoot = "/run/nvidia/driver"
+const (
+	nvidiaDriverRoot = "/run/nvidia/driver"
+
+	nvidiaDRADriverName        = "dra-driver-nvidia-gpu"
+	nvidiaDRAKubeletPluginName = nvidiaDRADriverName + "-kubelet-plugin"
+)
 
 type GPUDriverType string
 
@@ -693,8 +698,16 @@ done;
 				gpusLog.Info("GPU is already in draining status, skip the step", "step", "set maintenance mode", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
 			}
 
-			// In RHOCP, no branch change is required based on the number of remaining GPUs.
-			// Detach gpu by running nvidia-smi drain -r directly in nvidia-driver-daemonset Pod.
+			isVM := isVMByCPUInfoInNvidiaDriverPod(ctx, clientset, restConfig, nvidiaPod, targetNodeName)
+			resetMethod := "nvidia-smi drain -r"
+			resetCommand := []string{"/usr/sbin/chroot", nvidiaDriverRoot, "/usr/bin/nvidia-smi", "drain", "-p", targetGPUBusID, "-r"}
+			if isVM {
+				resetMethod = "sysfs remove"
+				busIDForSysfs := strings.ToLower(targetGPUBusID)
+				resetCommand = []string{"/usr/sbin/chroot", nvidiaDriverRoot, "/bin/sh", "-c", fmt.Sprintf("/usr/bin/echo 1 | /usr/bin/tee /sys/bus/pci/devices/%s/remove > /dev/null", busIDForSysfs)}
+			}
+			gpusLog.Info("selected GPU reset method for nvidia-driver-daemonset pod", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID, "targetGPUBusID", targetGPUBusID, "isVM", isVM, "resetMethod", resetMethod)
+
 			stdOut, stdErr, execErr = execCommandInPod(
 				ctx,
 				clientset,
@@ -702,7 +715,7 @@ done;
 				nvidiaPod.Namespace,
 				nvidiaPod.Name,
 				nvidiaPod.Spec.Containers[0].Name,
-				[]string{"/usr/sbin/chroot", nvidiaDriverRoot, "/usr/bin/nvidia-smi", "drain", "-p", targetGPUBusID, "-r"},
+				resetCommand,
 			)
 			if execErr != nil || stdErr != "" {
 				return fmt.Errorf("detach command 'reset GPU' failed: '%v', stderr: '%s', stdout: '%s'", execErr, stdErr, stdOut)
@@ -1023,7 +1036,7 @@ func getNvidiaDriverDaemonsetPod(ctx context.Context, c client.Client, targetNod
 
 func getDRAKubeletPluginPod(ctx context.Context, clientset *kubernetes.Clientset, targetNodeName string) (*corev1.Pod, error) {
 	pods, err := clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("app.kubernetes.io/name=nvidia-dra-driver-gpu"),
+		LabelSelector: fmt.Sprintf("app.kubernetes.io/name=%s", nvidiaDRADriverName),
 		FieldSelector: fmt.Sprintf("spec.nodeName=%s", targetNodeName),
 	})
 	if err != nil {
@@ -1031,7 +1044,7 @@ func getDRAKubeletPluginPod(ctx context.Context, clientset *kubernetes.Clientset
 	}
 
 	for _, pod := range pods.Items {
-		if strings.HasPrefix(pod.Name, "nvidia-dra-driver-gpu-kubelet-plugin") {
+		if strings.HasPrefix(pod.Name, nvidiaDRAKubeletPluginName) {
 			return &pod, nil
 		}
 	}
@@ -1048,12 +1061,12 @@ func TerminateKubeletPluginPodOnNode(ctx context.Context, clientset *kubernetes.
 	}
 
 	if draPod == nil {
-		gpusLog.Info("skip terminate because nvidia-dra-driver-gpu-kubelet-plugin not found")
+		gpusLog.Info("skip terminate because DRA kubelet plugin pod not found")
 		return nil
 	}
 
 	if time.Since(draPod.CreationTimestamp.Time) <= 10*time.Second {
-		gpusLog.Info("skip terminate because nvidia-dra-driver-gpu-kubelet-plugin already terminated recently")
+		gpusLog.Info("skip terminate because DRA kubelet plugin pod already terminated recently")
 		return nil
 	}
 
@@ -1196,6 +1209,26 @@ func getGPUInfoFromCroNodeAgentPod(ctx context.Context, clientset *kubernetes.Cl
 	}
 
 	return gpuInfos, nil
+}
+
+func isVMByCPUInfoInNvidiaDriverPod(ctx context.Context, clientset *kubernetes.Clientset, restConfig *rest.Config, pod *corev1.Pod, targetNodeName string) bool {
+	stdOut, stdErr, execErr := execCommandInPod(
+		ctx,
+		clientset,
+		restConfig,
+		pod.Namespace,
+		pod.Name,
+		pod.Spec.Containers[0].Name,
+		[]string{"/bin/sh", "-c", "if /usr/bin/grep -qi hypervisor /proc/cpuinfo 2>/dev/null; then /usr/bin/echo true; fi"},
+	)
+	if execErr != nil || stdErr != "" {
+		gpusLog.Info("failed to detect virtualization from /proc/cpuinfo in nvidia-driver-daemonset pod, treat as bare metal", "targetNodeName", targetNodeName, "podName", pod.Name, "execErr", execErr, "stderr", stdErr, "stdout", stdOut)
+		return false
+	}
+
+	isVM := strings.TrimSpace(stdOut) == "true"
+	gpusLog.Info("detected virtualization from /proc/cpuinfo in nvidia-driver-daemonset pod", "targetNodeName", targetNodeName, "podName", pod.Name, "isVM", isVM)
+	return isVM
 }
 
 func checkGPUDrainStatus(ctx context.Context, clientset *kubernetes.Clientset, restConfig *rest.Config, pod *corev1.Pod, targetNodeName string, targetGPUBusID string, driverType GPUDriverType) (bool, error) {
