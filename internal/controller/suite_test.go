@@ -19,10 +19,12 @@ package controller
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"reflect"
 	"runtime"
 	"testing"
+	"time"
 
 	gpuv1 "github.com/NVIDIA/gpu-operator/api/v1"
 	metal3v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
@@ -30,10 +32,18 @@ import (
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/onsi/gomega/format"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
+	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
 	"k8s.io/client-go/util/homedir"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
@@ -58,6 +68,90 @@ var (
 	worker7Name = "worker-7"
 )
 
+var openShiftMachineGVK = schema.GroupVersionKind{
+	Group:   "machine.openshift.io",
+	Version: "v1beta1",
+	Kind:    "Machine",
+}
+
+func newOpenShiftMachine(name, namespace string, annotations map[string]string) *unstructured.Unstructured {
+	machine := &unstructured.Unstructured{}
+	machine.SetGroupVersionKind(openShiftMachineGVK)
+	machine.SetName(name)
+	machine.SetNamespace(namespace)
+	machine.SetAnnotations(annotations)
+	return machine
+}
+
+func deleteAllOpenShiftMachines(namespace string) {
+	machine := &unstructured.Unstructured{}
+	machine.SetGroupVersionKind(openShiftMachineGVK)
+	Expect(k8sClient.DeleteAllOf(ctx, machine, client.InNamespace(namespace))).NotTo(HaveOccurred())
+}
+
+func newMetal3Machine(name, namespace string, annotations map[string]string) *machinev1beta1.Metal3Machine {
+	return &machinev1beta1.Metal3Machine{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Namespace:   namespace,
+			Annotations: annotations,
+		},
+	}
+}
+
+func deleteAllMetal3Machines(namespace string) {
+	Expect(k8sClient.DeleteAllOf(ctx, &machinev1beta1.Metal3Machine{}, client.InNamespace(namespace))).NotTo(HaveOccurred())
+}
+
+func installOpenShiftMachineCRD(ctx context.Context, cfg *rest.Config) {
+	apiExtensionsClient, err := apiextensionsclientset.NewForConfig(cfg)
+	Expect(err).NotTo(HaveOccurred())
+
+	crd, err := apiExtensionsClient.ApiextensionsV1().CustomResourceDefinitions().Create(ctx, &apiextensionsv1.CustomResourceDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "machines.machine.openshift.io",
+		},
+		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
+			Group: "machine.openshift.io",
+			Names: apiextensionsv1.CustomResourceDefinitionNames{
+				Kind:     "Machine",
+				ListKind: "MachineList",
+				Plural:   "machines",
+				Singular: "machine",
+			},
+			Scope: apiextensionsv1.NamespaceScoped,
+			Versions: []apiextensionsv1.CustomResourceDefinitionVersion{
+				{
+					Name:    "v1beta1",
+					Served:  true,
+					Storage: true,
+					Schema: &apiextensionsv1.CustomResourceValidation{
+						OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
+							Type:                   "object",
+							XPreserveUnknownFields: ptr.To(true),
+						},
+					},
+				},
+			},
+		},
+	}, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred())
+
+	err = wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, 5*time.Second, true, func(ctx context.Context) (bool, error) {
+		current, err := apiExtensionsClient.ApiextensionsV1().CustomResourceDefinitions().Get(ctx, crd.Name, metav1.GetOptions{})
+		if err != nil {
+			return false, err
+		}
+		for _, condition := range current.Status.Conditions {
+			if condition.Type == apiextensionsv1.Established && condition.Status == apiextensionsv1.ConditionTrue {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+	Expect(err).NotTo(HaveOccurred())
+}
+
 var (
 	composableResource0Name = "gpu-00000000-temp-uuid-0000-000000000000"
 	composableResource1Name = "gpu-00000000-temp-uuid-0000-000000000001"
@@ -67,6 +161,69 @@ var (
 	composableResource5Name = "gpu-00000000-temp-uuid-0000-000000000005"
 	composableResource6Name = "gpu-00000000-temp-uuid-0000-000000000006"
 )
+
+func installNvidiaClusterPolicyCRD(ctx context.Context, cfg *rest.Config) {
+	apiExtensionsClient, err := apiextensionsclientset.NewForConfig(cfg)
+	Expect(err).NotTo(HaveOccurred())
+
+	crd, err := apiExtensionsClient.ApiextensionsV1().CustomResourceDefinitions().Create(ctx, &apiextensionsv1.CustomResourceDefinition{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "clusterpolicies.nvidia.com",
+		},
+		Spec: apiextensionsv1.CustomResourceDefinitionSpec{
+			Group: "nvidia.com",
+			Names: apiextensionsv1.CustomResourceDefinitionNames{
+				Kind:     "ClusterPolicy",
+				ListKind: "ClusterPolicyList",
+				Plural:   "clusterpolicies",
+				Singular: "clusterpolicy",
+			},
+			Scope: apiextensionsv1.ClusterScoped,
+			Versions: []apiextensionsv1.CustomResourceDefinitionVersion{
+				{
+					Name:    "v1",
+					Served:  true,
+					Storage: true,
+					Schema: &apiextensionsv1.CustomResourceValidation{
+						OpenAPIV3Schema: &apiextensionsv1.JSONSchemaProps{
+							Type:                   "object",
+							XPreserveUnknownFields: ptr.To(true),
+						},
+					},
+				},
+			},
+		},
+	}, metav1.CreateOptions{})
+	Expect(err).NotTo(HaveOccurred())
+
+	err = wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, 5*time.Second, true, func(ctx context.Context) (bool, error) {
+		current, err := apiExtensionsClient.ApiextensionsV1().CustomResourceDefinitions().Get(ctx, crd.Name, metav1.GetOptions{})
+		if err != nil {
+			return false, err
+		}
+		for _, condition := range current.Status.Conditions {
+			if condition.Type == apiextensionsv1.Established && condition.Status == apiextensionsv1.ConditionTrue {
+				return true, nil
+			}
+		}
+		return false, nil
+	})
+	Expect(err).NotTo(HaveOccurred())
+}
+
+func createNvidiaClusterPolicy() {
+	clusterPolicy := &gpuv1.ClusterPolicy{
+		ObjectMeta: metav1.ObjectMeta{Name: "gpu-cluster-policy"},
+	}
+	err := k8sClient.Create(ctx, clusterPolicy)
+	if err != nil && !k8serrors.IsAlreadyExists(err) {
+		Expect(err).To(Succeed())
+	}
+}
+
+func deleteAllNvidiaClusterPolicies() {
+	Expect(k8sClient.DeleteAllOf(ctx, &gpuv1.ClusterPolicy{})).NotTo(HaveOccurred())
+}
 
 type myStatusWriter struct {
 	client.StatusWriter
@@ -87,8 +244,11 @@ func (m *myStatusWriter) Update(ctx context.Context, obj client.Object, opts ...
 type MyClient struct {
 	client.Client
 	MockGet          func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error
+	MockCreate       func(ctx context.Context, obj client.Object, opts ...client.CreateOption) error
+	MockList         func(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error
 	MockUpdate       func(ctx context.Context, obj client.Object, opts ...client.UpdateOption) error
 	MockStatusUpdate func(originalUpdate func(client.Object, ...client.SubResourceUpdateOption) error, ctx context.Context, obj client.Object, opts ...client.SubResourceUpdateOption) error
+	MockDelete       func(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error
 }
 
 func (m *MyClient) Get(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
@@ -96,6 +256,20 @@ func (m *MyClient) Get(ctx context.Context, key client.ObjectKey, obj client.Obj
 		return m.MockGet(ctx, key, obj, opts...)
 	}
 	return m.Client.Get(ctx, key, obj, opts...)
+}
+
+func (m *MyClient) Create(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
+	if m.MockCreate != nil {
+		return m.MockCreate(ctx, obj, opts...)
+	}
+	return m.Client.Create(ctx, obj, opts...)
+}
+
+func (m *MyClient) List(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+	if m.MockList != nil {
+		return m.MockList(ctx, list, opts...)
+	}
+	return m.Client.List(ctx, list, opts...)
 }
 
 func (m *MyClient) Update(ctx context.Context, obj client.Object, opts ...client.UpdateOption) error {
@@ -110,6 +284,13 @@ func (m *MyClient) Status() client.StatusWriter {
 		StatusWriter:     m.Client.Status(),
 		mockStatusUpdate: m.MockStatusUpdate,
 	}
+}
+
+func (m *MyClient) Delete(ctx context.Context, obj client.Object, opts ...client.DeleteOption) error {
+	if m.MockDelete != nil {
+		return m.MockDelete(ctx, obj, opts...)
+	}
+	return m.Client.Delete(ctx, obj, opts...)
 }
 
 type MockExecutor struct {
@@ -163,6 +344,8 @@ var _ = BeforeSuite(func() {
 	format.MaxLength = 1000
 	format.TruncatedDiff = false
 
+	os.Setenv("NVIDIA_GPU_OPERATOR_NAMESPACE", "nvidia-gpu-operator")
+
 	logf.SetLogger(zap.New(zap.WriteTo(GinkgoWriter), zap.UseDevMode(true)))
 
 	ctx, cancel = context.WithCancel(context.TODO())
@@ -170,15 +353,12 @@ var _ = BeforeSuite(func() {
 	goModCache := filepath.Join(homedir.HomeDir(), "go", "pkg", "mod")
 	machineCRDPath := filepath.Join(goModCache, "github.com", "metal3-io", "cluster-api-provider-metal3@v1.9.3", "config", "crd", "bases")
 	bmhCRDPath := filepath.Join(goModCache, "github.com", "metal3-io", "baremetal-operator@v0.9.1", "config", "base", "crds", "bases")
-	nvidiaCRDPath := filepath.Join(goModCache, "github.com", "!n!v!i!d!i!a", "gpu-operator@v1.11.1", "config", "crd", "bases")
-
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
 		CRDDirectoryPaths: []string{
 			filepath.Join("..", "..", "config", "crd", "bases"),
 			machineCRDPath,
 			bmhCRDPath,
-			nvidiaCRDPath,
 		},
 		ErrorIfCRDPathMissing: true,
 
@@ -204,14 +384,15 @@ var _ = BeforeSuite(func() {
 	cfg, err = testEnv.Start()
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
+	installOpenShiftMachineCRD(ctx, cfg)
+	installNvidiaClusterPolicyCRD(ctx, cfg)
 
 	s := scheme.Scheme
 	Expect(crov1alpha1.AddToScheme(s)).NotTo(HaveOccurred())
 	Expect(machinev1beta1.AddToScheme(s)).NotTo(HaveOccurred())
 	Expect(metal3v1alpha1.AddToScheme(s)).NotTo(HaveOccurred())
-	Expect(gpuv1.AddToScheme(s)).NotTo(HaveOccurred())
 	Expect(v1alpha3.AddToScheme(s)).NotTo(HaveOccurred())
-
+	Expect(gpuv1.AddToScheme(s)).NotTo(HaveOccurred())
 	// +kubebuilder:scaffold:scheme
 
 	tempClient, err := client.New(cfg, client.Options{Scheme: s})
