@@ -1,0 +1,35 @@
+header:
+  schema-version: 1.0.0
+  expiration-date: '2027-03-05T01:00:00.000Z'
+  project-url: https://github.com/CoHDI/composable-resource-operator
+project-lifecycle:
+  status: active
+  bug-fixes-only: false
+  core-maintainers:
+  - https://github.com/CoHDI/.github/blob/main/MAINTAINERS.md
+contribution-policy:
+  accepts-pull-requests: true
+  accepts-automated-pull-requests: false
+documentation:
+  - https://github.com/CoHDI/.github/blob/main/README.md
+distribution-points:
+  - https://github.com/CoHDI/composable-resource-operator/releases
+security-contacts:
+- type: email
+  value: CNCF-CoHDI-Maintainers@lists.cncf.io
+  primary: true
+vulnerability-reporting:
+  accepts-vulnerability-reports: true
+  email-contact: CNCF-CoHDI-Maintainers@lists.cncf.io
+  security-policy: https://github.com/CoHDI/.github/blob/main/SECURITY.md
+dependencies:
+  third-party-packages: true
+  dependencies-lists:
+    - https://github.com/CoHDI/composable-resource-operator/blob/main/go.mod
+  sbom:
+    - sbom-file: https://github.com/CoHDI/composable-resource-operator/releases
+      sbom-format: SPDX
+  dependencies-lifecycle:
+    policy-url: https://github.com/CoHDI/.github/blob/main/SECURITY.md
+  env-dependencies-policy:
+    policy-url: https://github.com/CoHDI/.github/blob/main/SECURITY.md
