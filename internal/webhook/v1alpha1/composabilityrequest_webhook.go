@@ -20,11 +20,9 @@ import (
 	"context"
 	"fmt"
 
-	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	crov1alpha1 "github.com/CoHDI/composable-resource-operator/api/v1alpha1"
@@ -36,7 +34,7 @@ var composabilityRequestWebhookLog = logf.Log.WithName("composabilityrequest-web
 
 // SetupComposabilityRequestWebhookWithManager registers the webhook for ComposabilityRequest in the manager.
 func SetupWebhookWithManager(mgr ctrl.Manager) error {
-	return ctrl.NewWebhookManagedBy(mgr).For(&crov1alpha1.ComposabilityRequest{}).
+	return ctrl.NewWebhookManagedBy(mgr, &crov1alpha1.ComposabilityRequest{}).
 		WithValidator(&ComposabilityRequestCustomValidator{
 			Client: mgr.GetClient(),
 		}).
@@ -62,42 +60,28 @@ type ComposabilityRequestCustomValidator struct {
 	client.Client
 }
 
-var _ webhook.CustomValidator = &ComposabilityRequestCustomValidator{}
+var _ admission.Validator[*crov1alpha1.ComposabilityRequest] = &ComposabilityRequestCustomValidator{}
 
-// ValidateCreate implements webhook.CustomValidator so a webhook will be registered for the type ComposabilityRequest.
-func (v *ComposabilityRequestCustomValidator) ValidateCreate(ctx context.Context, obj runtime.Object) (warnings admission.Warnings, err error) {
-	composabilityrequest, ok := obj.(*crov1alpha1.ComposabilityRequest)
-	if !ok {
-		err := fmt.Errorf("expected a ComposabilityRequest object but got %T", obj)
-		composabilityRequestWebhookLog.Error(err, "failed to get a ComposabilityRequest object", "obj", obj)
-		return nil, err
-	}
-
+// ValidateCreate implements admission.Validator so a webhook will be registered for the type ComposabilityRequest.
+func (v *ComposabilityRequestCustomValidator) ValidateCreate(ctx context.Context, composabilityrequest *crov1alpha1.ComposabilityRequest) (warnings admission.Warnings, err error) {
 	composabilityRequestWebhookLog.Info("validation for ComposabilityRequest upon creation", "name", composabilityrequest.GetName())
 
-	return validateRequest(v, composabilityrequest, ctx, obj)
+	return validateRequest(v, composabilityrequest, ctx)
 }
 
-// ValidateUpdate implements webhook.CustomValidator so a webhook will be registered for the type ComposabilityRequest.
-func (v *ComposabilityRequestCustomValidator) ValidateUpdate(ctx context.Context, oldObj runtime.Object, newObj runtime.Object) (warnings admission.Warnings, err error) {
-	newComposabilityRequest, ok := newObj.(*crov1alpha1.ComposabilityRequest)
-	if !ok {
-		err := fmt.Errorf("expected a ComposabilityRequest object but got %T", newObj)
-		composabilityRequestWebhookLog.Error(err, "failed to get a ComposabilityRequest object", "obj", newObj)
-		return nil, err
-	}
-
+// ValidateUpdate implements admission.Validator so a webhook will be registered for the type ComposabilityRequest.
+func (v *ComposabilityRequestCustomValidator) ValidateUpdate(ctx context.Context, oldComposabilityRequest, newComposabilityRequest *crov1alpha1.ComposabilityRequest) (warnings admission.Warnings, err error) {
 	composabilityRequestWebhookLog.Info("validation for ComposabilityRequest upon update", "name", newComposabilityRequest.GetName())
 
-	return validateRequest(v, newComposabilityRequest, ctx, newObj)
+	return validateRequest(v, newComposabilityRequest, ctx)
 }
 
-// ValidateDelete implements webhook.CustomValidator so a webhook will be registered for the type ComposabilityRequest.
-func (v *ComposabilityRequestCustomValidator) ValidateDelete(ctx context.Context, obj runtime.Object) (warnings admission.Warnings, err error) {
+// ValidateDelete implements admission.Validator so a webhook will be registered for the type ComposabilityRequest.
+func (v *ComposabilityRequestCustomValidator) ValidateDelete(ctx context.Context, composabilityrequest *crov1alpha1.ComposabilityRequest) (warnings admission.Warnings, err error) {
 	return nil, nil
 }
 
-func validateRequest(v *ComposabilityRequestCustomValidator, r *crov1alpha1.ComposabilityRequest, ctx context.Context, obj runtime.Object) (admission.Warnings, error) {
+func validateRequest(v *ComposabilityRequestCustomValidator, r *crov1alpha1.ComposabilityRequest, ctx context.Context) (admission.Warnings, error) {
 	composabilityRequestList := &crov1alpha1.ComposabilityRequestList{}
 	if err := v.List(ctx, composabilityRequestList); err != nil {
 		composabilityRequestWebhookLog.Error(err, "failed to list ComposabilityRequests")
