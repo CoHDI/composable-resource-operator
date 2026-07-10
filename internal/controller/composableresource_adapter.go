@@ -27,6 +27,7 @@ import (
 	"github.com/CoHDI/composable-resource-operator/internal/cdi"
 	ftiCM "github.com/CoHDI/composable-resource-operator/internal/cdi/fti/cm"
 	ftiFM "github.com/CoHDI/composable-resource-operator/internal/cdi/fti/fm"
+	"github.com/CoHDI/composable-resource-operator/internal/cdi/nec"
 	"github.com/CoHDI/composable-resource-operator/internal/cdi/sunfish"
 )
 
@@ -47,6 +48,12 @@ func NewComposableResourceAdapter(ctx context.Context, client client.Client, cli
 	switch cdiProviderType := os.Getenv("CDI_PROVIDER_TYPE"); cdiProviderType {
 	case "SUNFISH":
 		cdiProvider = sunfish.NewSunfishClient()
+	case "NEC":
+		necClient, err := nec.NewNECClient(ctx, client)
+		if err != nil {
+			return nil, err
+		}
+		cdiProvider = necClient
 	case "FTI_CDI":
 		clusterUUID := os.Getenv("FTI_CDI_CLUSTER_ID")
 		if clusterUUID == "" && deviceResourceType == "DEVICE_PLUGIN" {

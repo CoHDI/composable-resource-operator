@@ -28,9 +28,10 @@ import (
 	"time"
 
 	metal3v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
-	machinev1beta1 "github.com/metal3-io/cluster-api-provider-metal3/api/v1beta1"
 	"golang.org/x/oauth2"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -47,6 +48,12 @@ var (
 	addFailed        = "ADD_FAILED"
 	removeFailed     = "REMOVE_FAILED"
 	cmRequestTimeout = 60 * time.Second
+)
+
+const (
+	resourceStatusOK       = "0"
+	resourceStatusWarning  = "1"
+	resourceStatusCritical = "2"
 )
 
 type FTIClient struct {
@@ -166,15 +173,13 @@ func (f *FTIClient) AddResource(instance *v1alpha1.ComposableResource) (deviceID
 		return "", "", err
 	}
 
-	if response.StatusCode != http.StatusOK {
-		errBody := &fticmapi.ErrorBody{}
-		if err := json.Unmarshal(body, errBody); err != nil {
-			clientLog.Error(err, "failed to unmarshal CM scaleup error response body into errBody", "ComposableResource", instance.Name)
-			return "", "", fmt.Errorf("failed to unmarshal CM scaleup error response body into errBody. Original error: %w", err)
-		}
-
-		err = fmt.Errorf("failed to process CM scaleup request. http returned status: '%d', cm return code: '%s', error message: '%s'", errBody.Status, errBody.Detail.Code, errBody.Detail.Message)
-		clientLog.Error(err, "failed to process CM scaleup request", "ComposableResource", instance.Name)
+	if !isHTTPSuccess(response.StatusCode) {
+		err = fmt.Errorf("failed to process CM scaleup request. http returned status: %d", response.StatusCode)
+		clientLog.Error(err, "failed to process CM scaleup request",
+			"ComposableResource", instance.Name,
+			"httpStatusCode", response.StatusCode,
+			"rawBody", string(body),
+		)
 		return "", "", err
 	}
 
@@ -245,15 +250,13 @@ func (f *FTIClient) RemoveResource(instance *v1alpha1.ComposableResource) error 
 		return err
 	}
 
-	if response.StatusCode != http.StatusOK {
-		errBody := &fticmapi.ErrorBody{}
-		if err := json.Unmarshal(body, errBody); err != nil {
-			clientLog.Error(err, "failed to unmarshal CM scaledown error response body into errBody", "ComposableResource", instance.Name)
-			return fmt.Errorf("failed to unmarshal CM scaledown error response body into errBody. Original error: %w", err)
-		}
-
-		err = fmt.Errorf("failed to process CM scaledown request. http returned status: %d, cm return code: %s, error message: %s", errBody.Status, errBody.Detail.Code, errBody.Detail.Message)
-		clientLog.Error(err, "failed to process CM scaledown request", "ComposableResource", instance.Name)
+	if !isHTTPSuccess(response.StatusCode) {
+		err = fmt.Errorf("failed to process CM scaledown request. http returned status: %d", response.StatusCode)
+		clientLog.Error(err, "failed to process CM scaledown request",
+			"ComposableResource", instance.Name,
+			"httpStatusCode", response.StatusCode,
+			"rawBody", string(body),
+		)
 		return err
 	}
 
@@ -288,15 +291,20 @@ func (f *FTIClient) CheckResource(instance *v1alpha1.ComposableResource) error {
 
 			for _, device := range resourceSpec.Devices {
 				if device.DeviceUUID == instance.Status.DeviceID {
-					if device.Detail.ResourceOPStatus[:1] == "0" {
+					resourceOPStatus := string(device.Detail.ResourceOPStatus)
+					if len(resourceOPStatus) == 0 {
+						return fmt.Errorf("the target gpu '%s' on machine '%s' has empty status in CM", instance.Status.DeviceID, machineID)
+					}
+
+					if resourceOPStatus[:1] == resourceStatusOK {
 						// The target device exists and has no error, return OK.
 						return nil
-					} else if device.Detail.ResourceOPStatus[:1] == "1" {
+					} else if resourceOPStatus[:1] == resourceStatusWarning {
 						return fmt.Errorf("the target gpu '%s' is showing a Warning status in CM", instance.Status.DeviceID)
-					} else if device.Detail.ResourceOPStatus[:1] == "2" {
+					} else if resourceOPStatus[:1] == resourceStatusCritical {
 						return fmt.Errorf("the target gpu '%s' is showing a Critical status in CM", instance.Status.DeviceID)
 					} else {
-						return fmt.Errorf("the target gpu '%s' has unknown status '%s' in CM", instance.Status.DeviceID, device.Detail.ResourceOPStatus)
+						return fmt.Errorf("the target gpu '%s' has unknown status '%s' in CM", instance.Status.DeviceID, resourceOPStatus)
 					}
 				}
 			}
@@ -364,7 +372,12 @@ func (f *FTIClient) getNodeMachineID(nodeName string) (string, error) {
 		return "", fmt.Errorf("failed to get annotation 'machine.openshift.io/machine' from Node %s, now is '%s'", node.Name, machineInfo)
 	}
 
-	machine := &machinev1beta1.Metal3Machine{}
+	machine := &unstructured.Unstructured{}
+	machine.SetGroupVersionKind(schema.GroupVersionKind{
+		Group:   "machine.openshift.io",
+		Version: "v1beta1",
+		Kind:    "Machine",
+	})
 	if err := f.client.Get(f.ctx, client.ObjectKey{Namespace: machineInfoParts[0], Name: machineInfoParts[1]}, machine); err != nil {
 		return "", err
 	}
@@ -372,7 +385,7 @@ func (f *FTIClient) getNodeMachineID(nodeName string) (string, error) {
 	bmhInfo := machine.GetAnnotations()["metal3.io/BareMetalHost"]
 	bmhInfoParts := strings.Split(bmhInfo, "/")
 	if len(bmhInfoParts) != 2 {
-		return "", fmt.Errorf("failed to get annotation 'metal3.io/BareMetalHost' from Machine %s, now is '%s'", machine.Name, bmhInfo)
+		return "", fmt.Errorf("failed to get annotation 'metal3.io/BareMetalHost' from Machine %s, now is '%s'", machine.GetName(), bmhInfo)
 	}
 
 	bmh := &metal3v1alpha1.BareMetalHost{}
@@ -411,13 +424,13 @@ func (f *FTIClient) getMachineInfo(machineID string) (*fticmapi.Data, error) {
 		return nil, err
 	}
 
-	if response.StatusCode != http.StatusOK {
-		errBody := &fticmapi.ErrorBody{}
-		if err := json.Unmarshal(body, errBody); err != nil {
-			return nil, fmt.Errorf("failed to unmarshal CM get error response body into errBody. Original error: %w", err)
-		}
-
-		err = fmt.Errorf("failed to process CM get request. http returned status: '%d', cm return code: '%s', error message: '%s'", errBody.Status, errBody.Detail.Code, errBody.Detail.Message)
+	if !isHTTPSuccess(response.StatusCode) {
+		err = fmt.Errorf("failed to process CM get request. http returned status: %d", response.StatusCode)
+		clientLog.Error(err, "failed to process CM get request",
+			"machineID", machineID,
+			"httpStatusCode", response.StatusCode,
+			"rawBody", string(body),
+		)
 		return nil, err
 	}
 
@@ -458,27 +471,24 @@ func checkAddingResources(machineData *fticmapi.Data, composableResourceList *v1
 	return specUUID, deviceCount, "", "", nil
 }
 
+func isHTTPSuccess(statusCode int) bool {
+	return statusCode >= 200 && statusCode < 300
+}
+
 func checkRemovingResources(machineData *fticmapi.Data, instance *v1alpha1.ComposableResource) (string, int, error) {
-	var specUUID string
-	var deviceCount int
 	for _, resourceSpec := range machineData.Cluster.Machine.ResourceSpecs {
-		if !isSpecMatch(resourceSpec, instance) {
+		if resourceSpec.Type != instance.Spec.Type {
 			continue
 		}
-
-		specUUID = resourceSpec.SpecUUID
-		deviceCount = resourceSpec.DeviceCount
 
 		for _, device := range resourceSpec.Devices {
 			if device.DeviceUUID == instance.Status.DeviceID {
 				if device.Status == removeFailed {
-					return specUUID, deviceCount, fmt.Errorf("%s", device.StatusReason)
+					return resourceSpec.SpecUUID, resourceSpec.DeviceCount, fmt.Errorf("%s", device.StatusReason)
 				}
-				return specUUID, deviceCount, nil
+				return resourceSpec.SpecUUID, resourceSpec.DeviceCount, nil
 			}
 		}
-
-		break
 	}
 
 	return "", 0, nil
