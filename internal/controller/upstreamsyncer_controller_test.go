@@ -17,8 +17,10 @@
 package controller
 
 import (
+	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -26,9 +28,9 @@ import (
 	"time"
 
 	crov1alpha1 "github.com/CoHDI/composable-resource-operator/api/v1alpha1"
+	"github.com/CoHDI/composable-resource-operator/internal/cdi"
 	"github.com/agiledragon/gomonkey/v2"
 	metal3v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
-	machinev1beta1 "github.com/metal3-io/cluster-api-provider-metal3/api/v1beta1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	appsv1 "k8s.io/api/apps/v1"
@@ -41,6 +43,26 @@ import (
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
+
+type fakeCdiProvider struct {
+	getResourcesFunc func() ([]cdi.DeviceInfo, error)
+}
+
+func (f *fakeCdiProvider) AddResource(instance *crov1alpha1.ComposableResource) (string, string, error) {
+	panic("not used in upstream syncer tests")
+}
+
+func (f *fakeCdiProvider) RemoveResource(instance *crov1alpha1.ComposableResource) error {
+	panic("not used in upstream syncer tests")
+}
+
+func (f *fakeCdiProvider) CheckResource(instance *crov1alpha1.ComposableResource) error {
+	panic("not used in upstream syncer tests")
+}
+
+func (f *fakeCdiProvider) GetResources() ([]cdi.DeviceInfo, error) {
+	return f.getResourcesFunc()
+}
 
 var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 	BeforeAll(func() {
@@ -124,7 +146,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 				"composable-resource-operator-system",
 				"openshift-machine-api",
 				"nvidia-gpu-operator",
-				"nvidia-dra-driver-gpu",
+				"dra-driver-nvidia-gpu",
 			}
 			for _, nsName := range namespacesToCreate {
 				ns := &corev1.Namespace{}
@@ -144,6 +166,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 			reconciler = &UpstreamSyncerReconciler{
 				Client:         k8sClient,
 				ClientSet:      clientSet,
+				RestConfig:     cfg,
 				Scheme:         scheme.Scheme,
 				missingDevices: make(map[string]time.Time),
 			}
@@ -206,14 +229,25 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 				os.Unsetenv("FTI_CDI_TENANT_ID")
 				os.Unsetenv("FTI_CDI_CLUSTER_ID")
 
+				k8sClient.MockGet = nil
+				k8sClient.MockCreate = nil
+				k8sClient.MockList = nil
 				k8sClient.MockUpdate = nil
 				k8sClient.MockStatusUpdate = nil
 
 				Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
-				Expect(k8sClient.DeleteAllOf(ctx, &machinev1beta1.Metal3Machine{}, client.InNamespace("openshift-machine-api"))).NotTo(HaveOccurred())
+				deleteAllOpenShiftMachines("openshift-machine-api")
 				Expect(k8sClient.DeleteAllOf(ctx, &metal3v1alpha1.BareMetalHost{}, client.InNamespace("openshift-machine-api"))).NotTo(HaveOccurred())
 				Expect(k8sClient.DeleteAllOf(ctx, &corev1.Secret{}, client.InNamespace("composable-resource-operator-system"))).NotTo(HaveOccurred())
 
+				Expect(k8sClient.DeleteAllOf(ctx, &corev1.Pod{},
+					client.InNamespace("gpu-operator"),
+					&client.DeleteAllOfOptions{
+						DeleteOptions: client.DeleteOptions{
+							GracePeriodSeconds: ptr.To(int64(0)),
+						},
+					},
+				)).NotTo(HaveOccurred())
 				Expect(k8sClient.DeleteAllOf(ctx, &corev1.Pod{},
 					client.InNamespace("nvidia-gpu-operator"),
 					&client.DeleteAllOfOptions{
@@ -223,7 +257,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 					},
 				)).NotTo(HaveOccurred())
 				Expect(k8sClient.DeleteAllOf(ctx, &corev1.Pod{},
-					client.InNamespace("nvidia-dra-driver-gpu"),
+					client.InNamespace("dra-driver-nvidia-gpu"),
 					&client.DeleteAllOfOptions{
 						DeleteOptions: client.DeleteOptions{
 							GracePeriodSeconds: ptr.To(int64(0)),
@@ -231,7 +265,8 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 					},
 				)).NotTo(HaveOccurred())
 
-				Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("nvidia-dra-driver-gpu"))).NotTo(HaveOccurred())
+				Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("gpu-operator"))).NotTo(HaveOccurred())
+				Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("dra-driver-nvidia-gpu"))).NotTo(HaveOccurred())
 
 				Expect(k8sClient.DeleteAllOf(ctx, &resourcev1.ResourceSlice{})).NotTo(HaveOccurred())
 
@@ -245,7 +280,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 				cluster_uuid: "cluster0-uuid-temp-0000-000000000000",
 
 				extraHandling: func() {
-					Expect(k8sClient.DeleteAllOf(ctx, &machinev1beta1.Metal3Machine{}, client.InNamespace("openshift-machine-api"))).NotTo(HaveOccurred())
+					deleteAllOpenShiftMachines("openshift-machine-api")
 					Expect(k8sClient.DeleteAllOf(ctx, &metal3v1alpha1.BareMetalHost{}, client.InNamespace("openshift-machine-api"))).NotTo(HaveOccurred())
 					Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
 					nodesToCreate := []*corev1.Node{
@@ -264,7 +299,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 					}
 				},
 
-				expectedReconcileError: "failed to fetch data from upstream server: metal3machines.infrastructure.cluster.x-k8s.io \"machine-worker-0\" not found",
+				expectedReconcileError: "failed to fetch data from upstream server: machines.machine.openshift.io \"machine-worker-0\" not found",
 			}),
 			Entry("should fail because the CM returns an error message", testcase{
 				tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -285,15 +320,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 						Expect(k8sClient.Create(ctx, node)).To(Succeed())
 					}
 
-					machine0 := &machinev1beta1.Metal3Machine{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "machine-worker-0",
-							Namespace: "openshift-machine-api",
-							Annotations: map[string]string{
-								"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-							},
-						},
-					}
+					machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 					Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 					bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -324,7 +351,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 					Expect(k8sClient.Create(ctx, secret)).To(Succeed())
 				},
 
-				expectedReconcileError: "failed to fetch data from upstream server: failed to process CM get request. http returned status: '404', cm return code: 'E02XXXX', error message: 'machine not found'",
+				expectedReconcileError: "failed to fetch data from upstream server: failed to process CM get request. http returned status: 404",
 			}),
 			Entry("should wait when there is an extra device in upstram server because it needs to track with grace period", testcase{
 				tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -345,15 +372,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 						Expect(k8sClient.Create(ctx, node)).To(Succeed())
 					}
 
-					machine0 := &machinev1beta1.Metal3Machine{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "machine-worker-0",
-							Namespace: "openshift-machine-api",
-							Annotations: map[string]string{
-								"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-							},
-						},
-					}
+					machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 					Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 					bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -408,15 +427,7 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 						Expect(k8sClient.Create(ctx, node)).To(Succeed())
 					}
 
-					machine0 := &machinev1beta1.Metal3Machine{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "machine-worker-0",
-							Namespace: "openshift-machine-api",
-							Annotations: map[string]string{
-								"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
-							},
-						},
-					}
+					machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 					Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 					bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -457,6 +468,8 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 				isCreated: true,
 
 				extraHandling: func() {
+					createNvidiaDriverDaemonset("gpu-operator")
+
 					nodesToCreate := []*corev1.Node{
 						{
 							ObjectMeta: metav1.ObjectMeta{
@@ -471,15 +484,62 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 						Expect(k8sClient.Create(ctx, node)).To(Succeed())
 					}
 
-					machine0 := &machinev1beta1.Metal3Machine{
+					machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
+					Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
+
+					bmh0 := &metal3v1alpha1.BareMetalHost{
 						ObjectMeta: metav1.ObjectMeta{
-							Name:      "machine-worker-0",
+							Name:      "bmh-worker-0",
 							Namespace: "openshift-machine-api",
 							Annotations: map[string]string{
-								"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0",
+								"cluster-manager.cdi.io/machine": "machine0-uuid-temp-0000-000000000000",
 							},
 						},
 					}
+					Expect(k8sClient.Create(ctx, bmh0)).To(Succeed())
+
+					secret := &corev1.Secret{
+						ObjectMeta: metav1.ObjectMeta{
+							Name:      "credentials",
+							Namespace: "composable-resource-operator-system",
+						},
+						Type: corev1.SecretTypeOpaque,
+						Data: map[string][]byte{
+							"username":      []byte("good_user"),
+							"password":      []byte("test_password"),
+							"client_id":     []byte("test_client_id"),
+							"client_secret": []byte("test_client_secret"),
+							"realm":         []byte("test_realm"),
+						},
+					}
+					Expect(k8sClient.Create(ctx, secret)).To(Succeed())
+				},
+			}),
+			Entry("should not create a ComposableResource for detaching when no nvidia driver exists on target node even after grace period", testcase{
+				tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
+				cluster_uuid: "cluster0-uuid-temp-0000-000000000000",
+
+				missingDevicesTime: map[string]time.Time{
+					"GPU-device00-uuid-temp-0000-000000000000": time.Now().Add(-20 * time.Minute),
+				},
+				isCreated: false,
+
+				extraHandling: func() {
+					nodesToCreate := []*corev1.Node{
+						{
+							ObjectMeta: metav1.ObjectMeta{
+								Name: baseComposableResource.Spec.TargetNode,
+								Annotations: map[string]string{
+									"machine.openshift.io/machine": "openshift-machine-api/machine-worker-0",
+								},
+							},
+						},
+					}
+					for _, node := range nodesToCreate {
+						Expect(k8sClient.Create(ctx, node)).To(Succeed())
+					}
+
+					machine0 := newOpenShiftMachine("machine-worker-0", "openshift-machine-api", map[string]string{"metal3.io/BareMetalHost": "openshift-machine-api/bmh-worker-0"})
 					Expect(k8sClient.Create(ctx, machine0)).To(Succeed())
 
 					bmh0 := &metal3v1alpha1.BareMetalHost{
@@ -511,5 +571,285 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 				},
 			}),
 		)
+	})
+
+	Describe("When createDetachCR is triggered", func() {
+		var reconciler *UpstreamSyncerReconciler
+
+		BeforeEach(func() {
+			reconciler = &UpstreamSyncerReconciler{
+				Client:         k8sClient,
+				ClientSet:      nil,
+				Scheme:         scheme.Scheme,
+				missingDevices: make(map[string]time.Time),
+			}
+		})
+
+		AfterEach(func() {
+			k8sClient.MockCreate = nil
+			k8sClient.MockList = nil
+			k8sClient.MockGet = nil
+			k8sClient.MockUpdate = nil
+			k8sClient.MockStatusUpdate = nil
+			Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("gpu-operator"))).NotTo(HaveOccurred())
+			cleanAllComposableResources()
+		})
+
+		It("should successfully create a detach ComposableResource", func() {
+			createNvidiaDriverDaemonset("gpu-operator")
+
+			deviceInfo := cdi.DeviceInfo{
+				DeviceID:    "GPU-device00-uuid-temp-0000-000000000000",
+				CDIDeviceID: "GPU-device00-uuid-temp-0000-000000000res",
+				DeviceType:  "gpu",
+				Model:       "NVIDIA-A100-PCIE-80GB",
+				NodeName:    worker0Name,
+			}
+
+			err := reconciler.createDetachCR(ctx, deviceInfo)
+			Expect(err).NotTo(HaveOccurred())
+
+			composableResourceList := &crov1alpha1.ComposableResourceList{}
+			Expect(k8sClient.List(ctx, composableResourceList)).To(Succeed())
+			Expect(composableResourceList.Items).To(HaveLen(1))
+
+			created := composableResourceList.Items[0]
+			Expect(created.Labels["cohdi.io/ready-to-detach-device-id"]).To(Equal(deviceInfo.DeviceID))
+			Expect(created.Labels["cohdi.io/ready-to-detach-cdi-device-id"]).To(Equal(deviceInfo.CDIDeviceID))
+			Expect(created.Spec.Type).To(Equal(deviceInfo.DeviceType))
+			Expect(created.Spec.Model).To(Equal(deviceInfo.Model))
+			Expect(created.Spec.TargetNode).To(Equal(deviceInfo.NodeName))
+			Expect(created.Spec.ForceDetach).To(BeFalse())
+		})
+
+		It("should return error when creating detach ComposableResource fails", func() {
+			createNvidiaDriverDaemonset("gpu-operator")
+
+			k8sClient.MockCreate = func(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
+				return errors.New("create composable resource fails")
+			}
+
+			deviceInfo := cdi.DeviceInfo{
+				DeviceID:    "GPU-device00-uuid-temp-0000-000000000000",
+				CDIDeviceID: "GPU-device00-uuid-temp-0000-000000000res",
+				DeviceType:  "gpu",
+				Model:       "NVIDIA-A100-PCIE-80GB",
+				NodeName:    worker0Name,
+			}
+
+			err := reconciler.createDetachCR(ctx, deviceInfo)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(Equal("create composable resource fails"))
+		})
+	})
+
+	Describe("When syncUpstreamData is triggered directly", func() {
+		var reconciler *UpstreamSyncerReconciler
+
+		newAdapter := func(resources []cdi.DeviceInfo, err error) *ComposableResourceAdapter {
+			return &ComposableResourceAdapter{
+				client:    k8sClient,
+				clientSet: nil,
+				CDIProvider: &fakeCdiProvider{
+					getResourcesFunc: func() ([]cdi.DeviceInfo, error) {
+						return resources, err
+					},
+				},
+			}
+		}
+
+		BeforeEach(func() {
+			reconciler = &UpstreamSyncerReconciler{
+				Client:         k8sClient,
+				ClientSet:      nil,
+				Scheme:         scheme.Scheme,
+				missingDevices: make(map[string]time.Time),
+			}
+		})
+
+		AfterEach(func() {
+			k8sClient.MockCreate = nil
+			k8sClient.MockList = nil
+			k8sClient.MockGet = nil
+			k8sClient.MockUpdate = nil
+			k8sClient.MockStatusUpdate = nil
+			Expect(k8sClient.DeleteAllOf(ctx, &appsv1.DaemonSet{}, client.InNamespace("gpu-operator"))).NotTo(HaveOccurred())
+			cleanAllComposableResources()
+		})
+
+		It("should return error when fetching data from upstream server fails", func() {
+			adapter := newAdapter(nil, errors.New("upstream fetch failed"))
+
+			err := reconciler.syncUpstreamData(ctx, adapter)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(Equal("failed to fetch data from upstream server: upstream fetch failed"))
+		})
+
+		It("should return error when listing ComposableResources fails", func() {
+			k8sClient.MockList = func(ctx context.Context, list client.ObjectList, opts ...client.ListOption) error {
+				if _, ok := list.(*crov1alpha1.ComposableResourceList); ok {
+					return errors.New("list composable resources fails")
+				}
+				return k8sClient.Client.List(ctx, list, opts...)
+			}
+
+			adapter := newAdapter([]cdi.DeviceInfo{
+				{
+					DeviceID:    "GPU-device00-uuid-temp-0000-000000000000",
+					CDIDeviceID: "GPU-device00-uuid-temp-0000-000000000res",
+					DeviceType:  "gpu",
+					Model:       "NVIDIA-A100-PCIE-80GB",
+					NodeName:    worker0Name,
+				},
+			}, nil)
+
+			err := reconciler.syncUpstreamData(ctx, adapter)
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(Equal("failed to list ComposableResources: list composable resources fails"))
+		})
+
+		It("should start tracking a missing upstream device", func() {
+			deviceID := "GPU-device00-uuid-temp-0000-000000000000"
+			adapter := newAdapter([]cdi.DeviceInfo{
+				{
+					DeviceID:    deviceID,
+					CDIDeviceID: "GPU-device00-uuid-temp-0000-000000000res",
+					DeviceType:  "gpu",
+					Model:       "NVIDIA-A100-PCIE-80GB",
+					NodeName:    worker0Name,
+				},
+			}, nil)
+
+			err := reconciler.syncUpstreamData(ctx, adapter)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, tracked := reconciler.missingDevices[deviceID]
+			Expect(tracked).To(BeTrue())
+		})
+
+		It("should remove device from tracking when a local ComposableResource already exists", func() {
+			deviceID := "GPU-device00-uuid-temp-0000-000000000000"
+			reconciler.missingDevices[deviceID] = time.Now().Add(-20 * time.Minute)
+
+			createComposableResource(
+				"existing-local-resource",
+				baseComposableResource.Spec.DeepCopy(),
+				func() *crov1alpha1.ComposableResourceStatus {
+					status := baseComposableResource.Status.DeepCopy()
+					status.DeviceID = deviceID
+					return status
+				}(),
+				"Online",
+			)
+
+			adapter := newAdapter([]cdi.DeviceInfo{
+				{
+					DeviceID:    deviceID,
+					CDIDeviceID: "GPU-device00-uuid-temp-0000-000000000res",
+					DeviceType:  "gpu",
+					Model:       "NVIDIA-A100-PCIE-80GB",
+					NodeName:    worker0Name,
+				},
+			}, nil)
+
+			err := reconciler.syncUpstreamData(ctx, adapter)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, tracked := reconciler.missingDevices[deviceID]
+			Expect(tracked).To(BeFalse())
+		})
+
+		It("should keep tracking device when it is still within grace period", func() {
+			deviceID := "GPU-device00-uuid-temp-0000-000000000000"
+			firstSeen := time.Now().Add(-1 * time.Minute)
+			reconciler.missingDevices[deviceID] = firstSeen
+
+			adapter := newAdapter([]cdi.DeviceInfo{
+				{
+					DeviceID:    deviceID,
+					CDIDeviceID: "GPU-device00-uuid-temp-0000-000000000res",
+					DeviceType:  "gpu",
+					Model:       "NVIDIA-A100-PCIE-80GB",
+					NodeName:    worker0Name,
+				},
+			}, nil)
+
+			err := reconciler.syncUpstreamData(ctx, adapter)
+			Expect(err).NotTo(HaveOccurred())
+
+			trackedTime, tracked := reconciler.missingDevices[deviceID]
+			Expect(tracked).To(BeTrue())
+			Expect(trackedTime).To(Equal(firstSeen))
+		})
+
+		It("should keep tracking device when grace period is exceeded but createDetachCR fails", func() {
+			createNvidiaDriverDaemonset("gpu-operator")
+
+			deviceID := "GPU-device00-uuid-temp-0000-000000000000"
+			reconciler.missingDevices[deviceID] = time.Now().Add(-20 * time.Minute)
+
+			k8sClient.MockCreate = func(ctx context.Context, obj client.Object, opts ...client.CreateOption) error {
+				return errors.New("create composable resource fails")
+			}
+
+			adapter := newAdapter([]cdi.DeviceInfo{
+				{
+					DeviceID:    deviceID,
+					CDIDeviceID: "GPU-device00-uuid-temp-0000-000000000res",
+					DeviceType:  "gpu",
+					Model:       "NVIDIA-A100-PCIE-80GB",
+					NodeName:    worker0Name,
+				},
+			}, nil)
+
+			err := reconciler.syncUpstreamData(ctx, adapter)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, tracked := reconciler.missingDevices[deviceID]
+			Expect(tracked).To(BeTrue())
+		})
+
+		It("should remove tracked device when it no longer exists on upstream", func() {
+			deviceID := "GPU-device00-uuid-temp-0000-000000000000"
+			reconciler.missingDevices[deviceID] = time.Now().Add(-20 * time.Minute)
+
+			adapter := newAdapter([]cdi.DeviceInfo{}, nil)
+
+			err := reconciler.syncUpstreamData(ctx, adapter)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, tracked := reconciler.missingDevices[deviceID]
+			Expect(tracked).To(BeFalse())
+		})
+
+		It("should create detach CR and remove device from tracking when grace period is exceeded", func() {
+			createNvidiaDriverDaemonset("gpu-operator")
+
+			deviceID := "GPU-device00-uuid-temp-0000-000000000000"
+			reconciler.missingDevices[deviceID] = time.Now().Add(-20 * time.Minute)
+
+			adapter := newAdapter([]cdi.DeviceInfo{
+				{
+					DeviceID:    deviceID,
+					CDIDeviceID: "GPU-device00-uuid-temp-0000-000000000res",
+					DeviceType:  "gpu",
+					Model:       "NVIDIA-A100-PCIE-80GB",
+					NodeName:    worker0Name,
+				},
+			}, nil)
+
+			err := reconciler.syncUpstreamData(ctx, adapter)
+			Expect(err).NotTo(HaveOccurred())
+
+			_, tracked := reconciler.missingDevices[deviceID]
+			Expect(tracked).To(BeFalse())
+
+			composableResourceList := &crov1alpha1.ComposableResourceList{}
+			Expect(k8sClient.List(ctx, composableResourceList)).To(Succeed())
+			Expect(composableResourceList.Items).To(HaveLen(1))
+
+			created := composableResourceList.Items[0]
+			Expect(created.Labels["cohdi.io/ready-to-detach-device-id"]).To(Equal(deviceID))
+		})
 	})
 })
