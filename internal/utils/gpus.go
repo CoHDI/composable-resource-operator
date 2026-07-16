@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -43,10 +44,25 @@ import (
 var gpusLog = ctrl.Log.WithName("utils_gpus")
 
 const (
-	nvidiaDriverRoot = "/run/nvidia/driver"
+	nvidiaDriverRoot          = "/run/nvidia/driver"
+	nvidiaDriverChrootCommand = "chroot"
 
 	nvidiaDRADriverName        = "dra-driver-nvidia-gpu"
 	nvidiaDRAKubeletPluginName = nvidiaDRADriverName + "-kubelet-plugin"
+)
+
+var (
+	// Candidate paths for chroot binary in order of preference
+	chrootCandidatePaths = []string{
+		"/usr/sbin/chroot",
+		"/usr/bin/chroot",
+		"/sbin/chroot",
+		"/bin/chroot",
+	}
+
+	// Cache for resolved chroot paths per node/pod
+	chrootPathCache = make(map[string]string)
+	chrootPathMutex sync.Mutex
 )
 
 type GPUDriverType string
@@ -281,7 +297,7 @@ func CheckNoGPULoads(ctx context.Context, c client.Client, clientset *kubernetes
 			}
 			return err
 		}
-		
+
 		command = []string{"/usr/bin/nvidia-smi", "--query-compute-apps=gpu_uuid,process_name", "--format=csv,noheader,nounits"}
 	default:
 		gpusLog.Info("no nvidia driver found on node, so there is no gpu load to check, skip it", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
@@ -572,6 +588,12 @@ fi
 				return err
 			}
 
+			// Resolve the chroot command path once and reuse it
+			chrootCmd, err := resolveChrootCommand(ctx, clientset, restConfig, nvidiaPod, targetNodeName)
+			if err != nil {
+				return err
+			}
+
 			// Get information about the GPU to be drained.
 			gpuInfos, err := getGPUInfoFromProc(
 				ctx,
@@ -580,7 +602,7 @@ fi
 				nvidiaPod,
 				targetNodeName,
 				"device_minor,gpu_uuid,pci.bus_id",
-				"/usr/sbin/chroot",
+				chrootCmd,
 				nvidiaDriverRoot,
 				"no GPUs detected via nvidia-driver-daemonset driver root proc scan",
 				"Successfully got GPU info from nvidia-driver-daemonset driver root",
@@ -621,7 +643,7 @@ fi
 					nvidiaPod.Namespace,
 					nvidiaPod.Name,
 					nvidiaPod.Spec.Containers[0].Name,
-					[]string{"/usr/sbin/chroot", nvidiaDriverRoot, "/usr/bin/nvidia-smi", "-i", targetGPUUUID, "-pm", "0"},
+					[]string{chrootCmd, nvidiaDriverRoot, "/usr/bin/nvidia-smi", "-i", targetGPUUUID, "-pm", "0"},
 				)
 				if execErr != nil || stdErr != "" {
 					if strings.Contains(stdOut, "No devices were found") {
@@ -651,7 +673,7 @@ for PID_DIR in /proc/[0-9]*; do
 	done;
 done;
 			`
-			checkNvidiaCommand := []string{"/usr/sbin/chroot", nvidiaDriverRoot, "sh", "-c", checkNvidiaShell}
+			checkNvidiaCommand := []string{chrootCmd, nvidiaDriverRoot, "sh", "-c", checkNvidiaShell}
 			stdOut, stdErr, execErr := execCommandInPod(
 				ctx,
 				clientset,
@@ -675,7 +697,7 @@ done;
 				nvidiaPod.Namespace,
 				nvidiaPod.Name,
 				nvidiaPod.Spec.Containers[0].Name,
-				[]string{"/usr/sbin/chroot", nvidiaDriverRoot, "/usr/bin/rm", "-f", "/dev/nvidia" + targetGPUDeviceMinor},
+				[]string{chrootCmd, nvidiaDriverRoot, "/usr/bin/rm", "-f", "/dev/nvidia" + targetGPUDeviceMinor},
 			)
 			if execErr != nil || stdErr != "" {
 				return fmt.Errorf("delete device file command 'remove file /dev/nvidiaX' failed: '%v', stderr: '%s', stdout: '%s'", execErr, stdErr, stdOut)
@@ -689,7 +711,7 @@ done;
 					nvidiaPod.Namespace,
 					nvidiaPod.Name,
 					nvidiaPod.Spec.Containers[0].Name,
-					[]string{"/usr/sbin/chroot", nvidiaDriverRoot, "/usr/bin/nvidia-smi", "drain", "-p", targetGPUBusID, "-m", "1"},
+					[]string{chrootCmd, nvidiaDriverRoot, "/usr/bin/nvidia-smi", "drain", "-p", targetGPUBusID, "-m", "1"},
 				)
 				if execErr != nil || stdErr != "" {
 					return fmt.Errorf("detach command 'set maintenance mode' failed: '%v', stderr: '%s', stdout: '%s'", execErr, stdErr, stdOut)
@@ -700,11 +722,11 @@ done;
 
 			isVM := isVMByCPUInfoInNvidiaDriverPod(ctx, clientset, restConfig, nvidiaPod, targetNodeName)
 			resetMethod := "nvidia-smi drain -r"
-			resetCommand := []string{"/usr/sbin/chroot", nvidiaDriverRoot, "/usr/bin/nvidia-smi", "drain", "-p", targetGPUBusID, "-r"}
+			resetCommand := []string{chrootCmd, nvidiaDriverRoot, "/usr/bin/nvidia-smi", "drain", "-p", targetGPUBusID, "-r"}
 			if isVM {
 				resetMethod = "sysfs remove"
 				busIDForSysfs := strings.ToLower(targetGPUBusID)
-				resetCommand = []string{"/usr/sbin/chroot", nvidiaDriverRoot, "/bin/sh", "-c", fmt.Sprintf("/usr/bin/echo 1 | /usr/bin/tee /sys/bus/pci/devices/%s/remove > /dev/null", busIDForSysfs)}
+				resetCommand = []string{chrootCmd, nvidiaDriverRoot, "/bin/sh", "-c", fmt.Sprintf("/usr/bin/echo 1 | /usr/bin/tee /sys/bus/pci/devices/%s/remove > /dev/null", busIDForSysfs)}
 			}
 			gpusLog.Info("selected GPU reset method for nvidia-driver-daemonset pod", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID, "targetGPUBusID", targetGPUBusID, "isVM", isVM, "resetMethod", resetMethod)
 
@@ -963,6 +985,41 @@ func HasDeviceTaint(ctx context.Context, c client.Client, resource *crov1alpha1.
 	}
 
 	return true, nil
+}
+
+// getChrootCacheKey creates a unique cache key for a node/pod combination.
+func getChrootCacheKey(targetNodeName string, pod *corev1.Pod) string {
+	return fmt.Sprintf("%s|%s|%s", targetNodeName, pod.Namespace, pod.Name)
+}
+
+// resolveChrootCommand finds the correct path to the chroot binary on the node/pod.
+// It tries the candidate paths and caches the result per node/pod to avoid repeated resolution.
+func resolveChrootCommand(ctx context.Context, clientset *kubernetes.Clientset, restConfig *rest.Config, pod *corev1.Pod, targetNodeName string) (string, error) {
+	cacheKey := getChrootCacheKey(targetNodeName, pod)
+
+	// Check cache first
+	chrootPathMutex.Lock()
+	if cachedPath, exists := chrootPathCache[cacheKey]; exists {
+		chrootPathMutex.Unlock()
+		return cachedPath, nil
+	}
+	chrootPathMutex.Unlock()
+
+	// Try each candidate path
+	for _, candidate := range chrootCandidatePaths {
+		_, _, err := execCommandInPod(ctx, clientset, restConfig, pod.Namespace, pod.Name, pod.Spec.Containers[0].Name, []string{"test", "-x", candidate})
+		if err == nil {
+			// Path exists and is executable
+			chrootPathMutex.Lock()
+			chrootPathCache[cacheKey] = candidate
+			chrootPathMutex.Unlock()
+			gpusLog.Info("resolved chroot command path", "targetNodeName", targetNodeName, "podNamespace", pod.Namespace, "podName", pod.Name, "chrootPath", candidate)
+			return candidate, nil
+		}
+	}
+
+	// Failed to resolve chroot command
+	return "", fmt.Errorf("failed to resolve chroot command: candidate paths %v not found on node %s, pod %s/%s", chrootCandidatePaths, targetNodeName, pod.Namespace, pod.Name)
 }
 
 func execCommandInPod(ctx context.Context, clientset *kubernetes.Clientset, restConfig *rest.Config, namespace string, podName string, containerName string, command []string) (string, string, error) {
