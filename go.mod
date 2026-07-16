@@ -9,7 +9,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/metal3-io/baremetal-operator/apis v0.13.1
 	github.com/metal3-io/cluster-api-provider-metal3/api v1.13.1
-	github.com/onsi/ginkgo/v2 v2.29.0
+	github.com/onsi/ginkgo/v2 v2.32.0
 	github.com/onsi/gomega v1.41.0
 	golang.org/x/oauth2 v0.36.0
 	k8s.io/api v0.35.6
