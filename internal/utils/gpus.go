@@ -43,7 +43,8 @@ import (
 var gpusLog = ctrl.Log.WithName("utils_gpus")
 
 const (
-	nvidiaDriverRoot = "/run/nvidia/driver"
+	nvidiaDriverRoot          = "/run/nvidia/driver"
+	nvidiaDriverChrootCommand = "chroot"
 
 	nvidiaDRADriverName        = "dra-driver-nvidia-gpu"
 	nvidiaDRAKubeletPluginName = nvidiaDRADriverName + "-kubelet-plugin"
@@ -580,7 +581,7 @@ fi
 				nvidiaPod,
 				targetNodeName,
 				"device_minor,gpu_uuid,pci.bus_id",
-				"/usr/sbin/chroot",
+				nvidiaDriverChrootCommand,
 				nvidiaDriverRoot,
 				"no GPUs detected via nvidia-driver-daemonset driver root proc scan",
 				"Successfully got GPU info from nvidia-driver-daemonset driver root",
@@ -621,7 +622,7 @@ fi
 					nvidiaPod.Namespace,
 					nvidiaPod.Name,
 					nvidiaPod.Spec.Containers[0].Name,
-					[]string{"/usr/sbin/chroot", nvidiaDriverRoot, "/usr/bin/nvidia-smi", "-i", targetGPUUUID, "-pm", "0"},
+					[]string{nvidiaDriverChrootCommand, nvidiaDriverRoot, "/usr/bin/nvidia-smi", "-i", targetGPUUUID, "-pm", "0"},
 				)
 				if execErr != nil || stdErr != "" {
 					if strings.Contains(stdOut, "No devices were found") {
@@ -651,7 +652,7 @@ for PID_DIR in /proc/[0-9]*; do
 	done;
 done;
 			`
-			checkNvidiaCommand := []string{"/usr/sbin/chroot", nvidiaDriverRoot, "sh", "-c", checkNvidiaShell}
+			checkNvidiaCommand := []string{nvidiaDriverChrootCommand, nvidiaDriverRoot, "sh", "-c", checkNvidiaShell}
 			stdOut, stdErr, execErr := execCommandInPod(
 				ctx,
 				clientset,
@@ -675,7 +676,7 @@ done;
 				nvidiaPod.Namespace,
 				nvidiaPod.Name,
 				nvidiaPod.Spec.Containers[0].Name,
-				[]string{"/usr/sbin/chroot", nvidiaDriverRoot, "/usr/bin/rm", "-f", "/dev/nvidia" + targetGPUDeviceMinor},
+				[]string{nvidiaDriverChrootCommand, nvidiaDriverRoot, "/usr/bin/rm", "-f", "/dev/nvidia" + targetGPUDeviceMinor},
 			)
 			if execErr != nil || stdErr != "" {
 				return fmt.Errorf("delete device file command 'remove file /dev/nvidiaX' failed: '%v', stderr: '%s', stdout: '%s'", execErr, stdErr, stdOut)
@@ -689,7 +690,7 @@ done;
 					nvidiaPod.Namespace,
 					nvidiaPod.Name,
 					nvidiaPod.Spec.Containers[0].Name,
-					[]string{"/usr/sbin/chroot", nvidiaDriverRoot, "/usr/bin/nvidia-smi", "drain", "-p", targetGPUBusID, "-m", "1"},
+					[]string{nvidiaDriverChrootCommand, nvidiaDriverRoot, "/usr/bin/nvidia-smi", "drain", "-p", targetGPUBusID, "-m", "1"},
 				)
 				if execErr != nil || stdErr != "" {
 					return fmt.Errorf("detach command 'set maintenance mode' failed: '%v', stderr: '%s', stdout: '%s'", execErr, stdErr, stdOut)
@@ -700,11 +701,11 @@ done;
 
 			isVM := isVMByCPUInfoInNvidiaDriverPod(ctx, clientset, restConfig, nvidiaPod, targetNodeName)
 			resetMethod := "nvidia-smi drain -r"
-			resetCommand := []string{"/usr/sbin/chroot", nvidiaDriverRoot, "/usr/bin/nvidia-smi", "drain", "-p", targetGPUBusID, "-r"}
+			resetCommand := []string{nvidiaDriverChrootCommand, nvidiaDriverRoot, "/usr/bin/nvidia-smi", "drain", "-p", targetGPUBusID, "-r"}
 			if isVM {
 				resetMethod = "sysfs remove"
 				busIDForSysfs := strings.ToLower(targetGPUBusID)
-				resetCommand = []string{"/usr/sbin/chroot", nvidiaDriverRoot, "/bin/sh", "-c", fmt.Sprintf("/usr/bin/echo 1 | /usr/bin/tee /sys/bus/pci/devices/%s/remove > /dev/null", busIDForSysfs)}
+				resetCommand = []string{nvidiaDriverChrootCommand, nvidiaDriverRoot, "/bin/sh", "-c", fmt.Sprintf("/usr/bin/echo 1 | /usr/bin/tee /sys/bus/pci/devices/%s/remove > /dev/null", busIDForSysfs)}
 			}
 			gpusLog.Info("selected GPU reset method for nvidia-driver-daemonset pod", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID, "targetGPUBusID", targetGPUBusID, "isVM", isVM, "resetMethod", resetMethod)
 
