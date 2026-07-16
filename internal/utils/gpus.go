@@ -1006,7 +1006,7 @@ func resolveChrootCommand(ctx context.Context, clientset *kubernetes.Clientset, 
 
 	// Try each candidate path
 	for _, candidate := range chrootCandidatePaths {
-		_, _, err := execCommandInPod(ctx, clientset, restConfig, pod.Namespace, pod.Name, pod.Spec.Containers[0].Name, []string{"test", "-x", candidate})
+		_, _, err := execCommandInPod(ctx, clientset, restConfig, pod.Namespace, pod.Name, pod.Spec.Containers[0].Name, []string{"/bin/sh", "-c", fmt.Sprintf("[ -x %s ]", candidate)})
 		if err == nil {
 			// Path exists and is executable
 			chrootPathMutex.Lock()
