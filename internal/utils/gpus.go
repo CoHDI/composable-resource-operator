@@ -44,8 +44,7 @@ import (
 var gpusLog = ctrl.Log.WithName("utils_gpus")
 
 const (
-	nvidiaDriverRoot          = "/run/nvidia/driver"
-	nvidiaDriverChrootCommand = "chroot"
+	nvidiaDriverRoot = "/run/nvidia/driver"
 
 	nvidiaDRADriverName        = "dra-driver-nvidia-gpu"
 	nvidiaDRAKubeletPluginName = nvidiaDRADriverName + "-kubelet-plugin"
