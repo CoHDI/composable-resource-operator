@@ -57,6 +57,8 @@ var (
 		"/usr/bin/chroot",
 		"/sbin/chroot",
 		"/bin/chroot",
+		"/usr/local/sbin/chroot",
+		"/usr/local/bin/chroot",
 	}
 
 	// Cache for resolved chroot paths per node/pod
@@ -1017,8 +1019,22 @@ func resolveChrootCommand(ctx context.Context, clientset *kubernetes.Clientset, 
 		}
 	}
 
+	// Verify if chroot is available in PATH
+	out, _, err := execCommandInPod(ctx, clientset, restConfig,
+		pod.Namespace, pod.Name, pod.Spec.Containers[0].Name,
+		[]string{"/bin/sh", "-c", "command -v chroot"},
+	)
+	resolved := strings.TrimSpace(out)
+	if err == nil && resolved != "" {
+		gpusLog.Info("rejecting PATH-resolved chroot which does not match trusted candidate paths",
+			"targetNodeName", targetNodeName, "podNamespace", pod.Namespace, "podName", pod.Name, "resolvedPath", resolved, "trustedPaths", chrootCandidatePaths)
+		return "", fmt.Errorf("failed to resolve chroot command: trusted candidate paths %v not found, but command %s found in PATH on node %s, pod %s/%s",
+			chrootCandidatePaths, resolved, targetNodeName, pod.Namespace, pod.Name)
+	}
+
 	// Failed to resolve chroot command
-	return "", fmt.Errorf("failed to resolve chroot command: candidate paths %v not found on node %s, pod %s/%s", chrootCandidatePaths, targetNodeName, pod.Namespace, pod.Name)
+	return "", fmt.Errorf("failed to resolve chroot command: trusted candidate paths %v not found/chroot not found in PATH/exec in pod failed on node %s, pod %s/%s",
+		chrootCandidatePaths, targetNodeName, pod.Namespace, pod.Name)
 }
 
 func execCommandInPod(ctx context.Context, clientset *kubernetes.Clientset, restConfig *rest.Config, namespace string, podName string, containerName string, command []string) (string, string, error) {
