@@ -1563,6 +1563,10 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				if tc.expectedReconcileError != "" {
 					Expect(err).To(HaveOccurred())
 					Expect(err.Error()).To(Equal(tc.expectedReconcileError))
+					if tc.expectedRequestStatus != nil {
+						Expect(composableResource).NotTo(BeNil())
+						Expect(composableResource.Status).To(Equal(*tc.expectedRequestStatus))
+					}
 				} else if tc.expectedRequestDeleted {
 					Expect(err).NotTo(HaveOccurred())
 					Expect(composableResource).NotTo(BeNil())
@@ -2525,7 +2529,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 					expectedReconcileError: "an error occurred with the resource in CM: 'add failed due to some reasons'",
 				}),
-				Entry("should return error message when nvidia-device-plugin-daemonset pod can not be found in cluster", testcase{
+				Entry("should return an error and remain Attaching when the nvidia-driver-daemonset pod cannot be found", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
 					cluster_uuid: "cluster0-uuid-temp-0000-000000000001",
 
@@ -2616,6 +2620,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
+					expectedReconcileError: "nvidia-driver-daemonset pod is not found on node worker-0",
 				}),
 				Entry("should wait when dra-driver-nvidia-gpu-kubelet-plugin Daemonset can not be found in cluster", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
