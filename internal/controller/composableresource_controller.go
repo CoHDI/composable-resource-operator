@@ -275,6 +275,7 @@ func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context,
 			if err := r.Status().Update(ctx, resource); err != nil {
 				return r.requeueOnErr(resource, err, "failed to update composableResource", "composableResource", resource.Name)
 			}
+			return ctrl.Result{}, err
 		}
 		if err := utils.TerminateKubeletPluginPodOnNode(ctx, r.Clientset, resource.Spec.TargetNode); err != nil {
 			composableResourceLog.Error(err, "failed to restart DRA kubelet plugin", "composableResource", resource.Name)
@@ -282,6 +283,7 @@ func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context,
 			if err := r.Status().Update(ctx, resource); err != nil {
 				return r.requeueOnErr(resource, err, "failed to update composableResource", "composableResource", resource.Name)
 			}
+			return ctrl.Result{}, err
 		}
 	}
 
