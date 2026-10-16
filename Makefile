@@ -104,7 +104,7 @@ generate: controller-gen ## Generate code containing DeepCopy, DeepCopyInto, and
 
 .PHONY: download-test-crds
 download-test-crds: ## Download external CRD modules required by envtest
-	go mod download github.com/metal3-io/cluster-api-provider-metal3@v1.9.3
+	go mod download github.com/metal3-io/cluster-api-provider-metal3@v1.14.1
 	go mod download github.com/metal3-io/baremetal-operator@v0.9.1
 
 .PHONY: fmt

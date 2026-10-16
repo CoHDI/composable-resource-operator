@@ -351,7 +351,7 @@ var _ = BeforeSuite(func() {
 	ctx, cancel = context.WithCancel(context.TODO())
 
 	goModCache := filepath.Join(homedir.HomeDir(), "go", "pkg", "mod")
-	machineCRDPath := filepath.Join(goModCache, "github.com", "metal3-io", "cluster-api-provider-metal3@v1.9.3", "config", "crd", "bases")
+	machineCRDPath := filepath.Join(goModCache, "github.com", "metal3-io", "cluster-api-provider-metal3@v1.14.1", "config", "crd", "bases")
 	bmhCRDPath := filepath.Join(goModCache, "github.com", "metal3-io", "baremetal-operator@v0.9.1", "config", "base", "crds", "bases")
 	By("bootstrapping test environment")
 	testEnv = &envtest.Environment{
