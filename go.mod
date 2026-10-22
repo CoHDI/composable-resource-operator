@@ -7,7 +7,7 @@ require (
 	github.com/agiledragon/gomonkey/v2 v2.14.0
 	github.com/google/go-cmp v0.7.0
 	github.com/google/uuid v1.6.0
-	github.com/metal3-io/baremetal-operator/apis v0.14.1
+	github.com/metal3-io/baremetal-operator/apis v0.14.2
 	github.com/metal3-io/cluster-api-provider-metal3/api v1.13.1
 	github.com/onsi/ginkgo/v2 v2.33.1
 	github.com/onsi/gomega v1.42.1
