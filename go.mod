@@ -10,7 +10,7 @@ require (
 	github.com/metal3-io/baremetal-operator/apis v0.14.1
 	github.com/metal3-io/cluster-api-provider-metal3/api v1.13.1
 	github.com/onsi/ginkgo/v2 v2.33.1
-	github.com/onsi/gomega v1.42.1
+	github.com/onsi/gomega v1.44.0
 	golang.org/x/oauth2 v0.37.0
 	k8s.io/api v0.37.1
 	k8s.io/apiextensions-apiserver v0.37.1
