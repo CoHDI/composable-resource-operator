@@ -20,9 +20,11 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -42,7 +44,6 @@ import (
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
-	"k8s.io/client-go/util/homedir"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
@@ -350,7 +351,12 @@ var _ = BeforeSuite(func() {
 
 	ctx, cancel = context.WithCancel(context.TODO())
 
-	goModCache := filepath.Join(homedir.HomeDir(), "go", "pkg", "mod")
+	// Resolve the module cache the same way the go command does, so that the CRDs downloaded by
+	// "make download-test-crds" are found even when GOPATH or GOMODCACHE is not the default.
+	goModCacheOutput, err := exec.Command("go", "env", "GOMODCACHE").Output()
+	Expect(err).NotTo(HaveOccurred(), "failed to run 'go env GOMODCACHE'")
+	goModCache := strings.TrimSpace(string(goModCacheOutput))
+	Expect(goModCache).NotTo(BeEmpty())
 	machineCRDPath := filepath.Join(goModCache, "github.com", "metal3-io", "cluster-api-provider-metal3@v1.9.3", "config", "crd", "bases")
 	bmhCRDPath := filepath.Join(goModCache, "github.com", "metal3-io", "baremetal-operator@v0.9.1", "config", "base", "crds", "bases")
 	By("bootstrapping test environment")
@@ -379,7 +385,6 @@ var _ = BeforeSuite(func() {
 		},
 	}
 
-	var err error
 	// cfg is defined in this file globally.
 	cfg, err = testEnv.Start()
 	Expect(err).NotTo(HaveOccurred())
