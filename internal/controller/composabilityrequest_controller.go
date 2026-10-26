@@ -246,75 +246,61 @@ func (r *ComposabilityRequestReconciler) handleNodeAllocatingState(ctx context.C
 		return r.requeueOnErr(request, err, "failed to get all nodes", "composabilityRequest", request.Name)
 	}
 
-	resourcesToAllocate := request.Spec.Resource.Size
-	resourcesToDelete := 0
 	allocatedNodesForDifferentPolicy := make(map[string]bool)
 	targetNodeForSamePolicy := ""
 
+	// Check every ComposableResource and keep only those that match this ComposabilityRequest.
+	keptResources := make([]crov1alpha1.ComposableResource, 0, len(composableResourceList.Items))
 	for _, resource := range composableResourceList.Items {
-		// Check ComposableResources and remove those that do not match this ComposabilityRequest from ComposabilityRequest.Status.Resources.
-		if resourcesToAllocate > 0 {
-			if resource.Spec.Type != request.Spec.Resource.Type || resource.Spec.Model != request.Spec.Resource.Model || resource.Spec.ForceDetach != request.Spec.Resource.ForceDetach {
-				delete(request.Status.Resources, resource.Name)
-				continue
-			}
-
-			if request.Spec.Resource.TargetNode != "" && resource.Spec.TargetNode != request.Spec.Resource.TargetNode {
-				delete(request.Status.Resources, resource.Name)
-				continue
-			}
-
-			if request.Spec.Resource.OtherSpec != nil {
-				isSufficient, err := utils.CheckNodeCapacitySufficient(ctx, r.Client, resource.Spec.TargetNode, request.Spec.Resource.OtherSpec)
-				if err != nil {
-					return r.requeueOnErr(request, err, "failed to check TargetNode capacity", "TargetNode", resource.Spec.TargetNode, "composabilityRequest", request.Name)
-				}
-				if !isSufficient {
-					delete(request.Status.Resources, resource.Name)
-					continue
-				}
-			}
-
-			switch request.Spec.Resource.AllocationPolicy {
-			case "differentnode":
-				// Make sure that all TargetNodes in request.Status.Resources are not the same.
-				if allocatedNodesForDifferentPolicy[resource.Spec.TargetNode] {
-					delete(request.Status.Resources, resource.Name)
-					continue
-				} else {
-					allocatedNodesForDifferentPolicy[resource.Spec.TargetNode] = true
-				}
-			case "samenode":
-				// Make sure that all TargetNodes in request.Status.Resources are the same.
-				if targetNodeForSamePolicy == "" {
-					targetNodeForSamePolicy = resource.Spec.TargetNode
-				} else {
-					if targetNodeForSamePolicy != resource.Spec.TargetNode {
-						delete(request.Status.Resources, resource.Name)
-						continue
-					}
-				}
-			}
-
-			// If this ComposableResource passes all the above checks, it means that it meets this ComposabilityRequest's requirement and can be kept.
-			resourcesToAllocate--
-		} else {
-			// The target size of ComposableResources has been met. Therefore, the size of remaining ComposableResources is being recorded for deletion.
-			resourcesToDelete++
+		if resource.Spec.Type != request.Spec.Resource.Type || resource.Spec.Model != request.Spec.Resource.Model || resource.Spec.ForceDetach != request.Spec.Resource.ForceDetach {
+			continue
 		}
+
+		if request.Spec.Resource.TargetNode != "" && resource.Spec.TargetNode != request.Spec.Resource.TargetNode {
+			continue
+		}
+
+		if request.Spec.Resource.OtherSpec != nil {
+			isSufficient, err := utils.CheckNodeCapacitySufficient(ctx, r.Client, resource.Spec.TargetNode, request.Spec.Resource.OtherSpec)
+			if err != nil {
+				return r.requeueOnErr(request, err, "failed to check TargetNode capacity", "TargetNode", resource.Spec.TargetNode, "composabilityRequest", request.Name)
+			}
+			if !isSufficient {
+				continue
+			}
+		}
+
+		switch request.Spec.Resource.AllocationPolicy {
+		case "differentnode":
+			// Make sure that all kept ComposableResources have different TargetNodes.
+			if allocatedNodesForDifferentPolicy[resource.Spec.TargetNode] {
+				continue
+			}
+			allocatedNodesForDifferentPolicy[resource.Spec.TargetNode] = true
+		case "samenode":
+			// Make sure that all kept ComposableResources have the same TargetNode.
+			if targetNodeForSamePolicy == "" {
+				targetNodeForSamePolicy = resource.Spec.TargetNode
+			} else if targetNodeForSamePolicy != resource.Spec.TargetNode {
+				continue
+			}
+		}
+
+		// If this ComposableResource passes all the above checks, it meets this ComposabilityRequest's requirement and can be kept.
+		keptResources = append(keptResources, resource)
 	}
 
 	composabilityRequestLog.Info("start removing ComposableResources according to the deletion priority", "composabilityRequest", request.Name)
 
-	// Remove ComposableResources according to the deletion priority.
-	if resourcesToDelete > 0 {
+	// If more ComposableResources than requested can be kept, remove the extra ones according to the deletion priority.
+	if resourcesToDelete := len(keptResources) - int(request.Spec.Resource.Size); resourcesToDelete > 0 {
 		type PrioritizedResources struct {
 			name    string
 			sortKey time.Time
 		}
 		resourcesByDeletionPriority := make([][]PrioritizedResources, 5)
 
-		for _, composableResource := range composableResourceList.Items {
+		for _, composableResource := range keptResources {
 			var sortTime time.Time
 
 			lastUsedTime := composableResource.Annotations[composableResourceLastUsedTimeAnnotation]
@@ -345,10 +331,11 @@ func (r *ComposabilityRequestReconciler) handleNodeAllocatingState(ctx context.C
 			})
 		}
 
+		resourcesToRemove := make(map[string]bool, resourcesToDelete)
 	deleteResourcesByPriorityLoop:
 		for i := 0; ; i++ {
 			for _, resource := range resourcesByDeletionPriority[i] {
-				delete(request.Status.Resources, resource.name)
+				resourcesToRemove[resource.name] = true
 				resourcesToDelete--
 
 				if resourcesToDelete == 0 {
@@ -356,7 +343,30 @@ func (r *ComposabilityRequestReconciler) handleNodeAllocatingState(ctx context.C
 				}
 			}
 		}
+
+		remainingResources := make([]crov1alpha1.ComposableResource, 0, len(keptResources))
+		for _, resource := range keptResources {
+			if !resourcesToRemove[resource.Name] {
+				remainingResources = append(remainingResources, resource)
+			}
+		}
+		keptResources = remainingResources
 	}
+
+	// Rebuild ComposabilityRequest.Status.Resources from the kept ComposableResources, so that entries
+	// for removed, mismatched or no longer existing ComposableResources do not linger in it.
+	request.Status.Resources = make(map[string]crov1alpha1.ScalarResourceStatus, len(keptResources))
+	for _, resource := range keptResources {
+		request.Status.Resources[resource.Name] = crov1alpha1.ScalarResourceStatus{
+			State:       resource.Status.State,
+			DeviceID:    resource.Status.DeviceID,
+			CDIDeviceID: resource.Status.CDIDeviceID,
+			NodeName:    resource.Spec.TargetNode,
+			Error:       resource.Status.Error,
+		}
+	}
+
+	resourcesToAllocate := request.Spec.Resource.Size - int64(len(keptResources))
 
 	composabilityRequestLog.Info("start allocating nodes based on the AllocationPolicy.", "composabilityRequest", request.Name)
 
@@ -468,9 +478,6 @@ func (r *ComposabilityRequestReconciler) handleNodeAllocatingState(ctx context.C
 	// TODO: The current logic is that if the current env cannot meet the GPU requirements, it will continue to wait. It may needs to be modified.
 	// https://docs.google.com/document/d/17Yqm7_z1QE0y4WHM1lL4Ja_RdcgRBR2KA19zgou_MSY/edit?disco=AAABUT77og0
 
-	if request.Status.Resources == nil {
-		request.Status.Resources = make(map[string]crov1alpha1.ScalarResourceStatus)
-	}
 	for i := 0; i < len(allocatingNodes); i++ {
 		resourceName := utils.GenerateComposableResourceName(request.Spec.Resource.Type)
 		request.Status.Resources[resourceName] = crov1alpha1.ScalarResourceStatus{
