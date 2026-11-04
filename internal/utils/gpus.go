@@ -19,7 +19,9 @@ package utils
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -44,6 +46,8 @@ import (
 var gpusLog = ctrl.Log.WithName("utils_gpus")
 
 const (
+	defaultNvidiaGpuOperatorNamespace = "gpu-operator"
+
 	nvidiaDriverRoot = "/run/nvidia/driver"
 
 	nvidiaDRADriverName        = "dra-driver-nvidia-gpu"
@@ -83,8 +87,15 @@ func (a AccountedAppInfo) String() string {
 	return fmt.Sprintf("GPUUUID: '%s', ProcessName: '%s'", a.GPUUUID, a.ProcessName)
 }
 
+func NvidiaGpuOperatorNamespace() string {
+	if ns := os.Getenv("NVIDIA_GPU_OPERATOR_NAMESPACE"); ns != "" {
+		return ns
+	}
+	return defaultNvidiaGpuOperatorNamespace
+}
+
 func EnsureGPUDriverExists(ctx context.Context, c client.Client, clientset *kubernetes.Clientset, restConfig *rest.Config, targetNodeName string) error {
-	driverType, err := detectGPUDriverType(ctx, c, clientset, restConfig, targetNodeName)
+	driverType, err := DetectGPUDriverType(ctx, c, clientset, restConfig, targetNodeName)
 	if err != nil {
 		return err
 	}
@@ -94,7 +105,7 @@ func EnsureGPUDriverExists(ctx context.Context, c client.Client, clientset *kube
 	return nil
 }
 
-func detectGPUDriverType(ctx context.Context, c client.Client, clientset *kubernetes.Clientset, restConfig *rest.Config, targetNodeName string) (GPUDriverType, error) {
+func DetectGPUDriverType(ctx context.Context, c client.Client, clientset *kubernetes.Clientset, restConfig *rest.Config, targetNodeName string) (GPUDriverType, error) {
 	hasNvidiaDriverPod, err := hasNvidiaDriverDaemonsetPod(ctx, c, targetNodeName)
 	if err != nil {
 		return GPUDriverTypeNone, err
@@ -142,7 +153,7 @@ func getClusterPolicy(ctx context.Context, c client.Client) (*gpuv1.ClusterPolic
 func hasNvidiaDriverDaemonsetPod(ctx context.Context, c client.Client, targetNodeName string) (bool, error) {
 	podList := &corev1.PodList{}
 	listOpts := []client.ListOption{
-		client.InNamespace(""),
+		client.InNamespace(NvidiaGpuOperatorNamespace()),
 		client.MatchingLabels{"app.kubernetes.io/component": "nvidia-driver"},
 	}
 	if err := c.List(ctx, podList, listOpts...); err != nil {
@@ -240,7 +251,7 @@ func CheckGPUVisible(ctx context.Context, client client.Client, clientset *kuber
 
 func CheckNoGPULoads(ctx context.Context, c client.Client, clientset *kubernetes.Clientset, restConfig *rest.Config, targetNodeName string, targetGPUUUID *string) error {
 
-	driverType, err := detectGPUDriverType(ctx, c, clientset, restConfig, targetNodeName)
+	driverType, err := DetectGPUDriverType(ctx, c, clientset, restConfig, targetNodeName)
 	if err != nil {
 		return err
 	}
@@ -290,7 +301,7 @@ func CheckNoGPULoads(ctx context.Context, c client.Client, clientset *kubernetes
 
 		command = []string{"/bin/chroot", "/host-root", "/usr/bin/nvidia-smi", "--query-compute-apps=gpu_uuid,process_name", "--format=csv,noheader,nounits"}
 	case GPUDriverTypeContainer:
-		pod, err = getNvidiaDriverDaemonsetPod(ctx, c, targetNodeName)
+		pod, err = requireReadyNvidiaDriverPod(ctx, c, targetNodeName)
 		if err != nil {
 			if strings.Contains(err.Error(), "nvidia-driver-daemonset pod is not found") {
 				gpusLog.Info("nvidia-driver-daemonset Pod is not found, it means that there is no GPU on the node, so there is no load, skip it", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
@@ -352,7 +363,7 @@ func CheckNoGPULoads(ctx context.Context, c client.Client, clientset *kubernetes
 func DrainGPU(ctx context.Context, c client.Client, clientset *kubernetes.Clientset, restConfig *rest.Config, targetNodeName string, targetGPUUUID string, deviceResourceType string) error {
 	gpusLog.Info("start draining gpu", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
 
-	driverType, err := detectGPUDriverType(ctx, c, clientset, restConfig, targetNodeName)
+	driverType, err := DetectGPUDriverType(ctx, c, clientset, restConfig, targetNodeName)
 	if err != nil {
 		return err
 	}
@@ -565,7 +576,7 @@ fi
 			}
 		} else if driverType == GPUDriverTypeContainer {
 			// OCP (K8S) + DRA
-			nvidiaPod, err := getNvidiaDriverDaemonsetPod(ctx, c, targetNodeName)
+			nvidiaPod, err := requireReadyNvidiaDriverPod(ctx, c, targetNodeName)
 			if err != nil {
 				if !strings.Contains(err.Error(), "nvidia-driver-daemonset pod is not found") {
 					return err
@@ -749,7 +760,7 @@ done;
 		}
 	} else {
 		// OCP + DEVICE_PLUGIN
-		nvidiaPod, err := getNvidiaDriverDaemonsetPod(ctx, c, targetNodeName)
+		nvidiaPod, err := requireReadyNvidiaDriverPod(ctx, c, targetNodeName)
 		if err != nil {
 			return err
 		}
@@ -864,12 +875,7 @@ done;
 	return nil
 }
 
-func RunNvidiaSmi(ctx context.Context, c client.Client, clientset *kubernetes.Clientset, restConfig *rest.Config, targetNodeName string) error {
-
-	driverType, err := detectGPUDriverType(ctx, c, clientset, restConfig, targetNodeName)
-	if err != nil {
-		return err
-	}
+func RunNvidiaSmi(ctx context.Context, c client.Client, clientset *kubernetes.Clientset, restConfig *rest.Config, targetNodeName string, driverType GPUDriverType) error {
 
 	switch driverType {
 	case GPUDriverTypeHost:
@@ -1066,14 +1072,25 @@ func execCommandInPod(ctx context.Context, clientset *kubernetes.Clientset, rest
 	return stdOut.String(), stdErr.String(), err
 }
 
-func getNvidiaDriverDaemonsetPod(ctx context.Context, c client.Client, targetNodeName string) (*corev1.Pod, error) {
+func requireReadyNvidiaDriverPod(ctx context.Context, c client.Client, targetNodeName string) (*corev1.Pod, error) {
+	pod, reason, err := FindReadyNvidiaDriverPod(ctx, c, targetNodeName)
+	if err != nil {
+		return nil, err
+	}
+	if pod == nil {
+		return nil, errors.New(reason)
+	}
+	return pod, nil
+}
+
+func FindReadyNvidiaDriverPod(ctx context.Context, c client.Client, targetNodeName string) (*corev1.Pod, string, error) {
 	podList := &corev1.PodList{}
 	listOpts := []client.ListOption{
-		client.InNamespace(""),
+		client.InNamespace(NvidiaGpuOperatorNamespace()),
 		client.MatchingLabels{"app.kubernetes.io/component": "nvidia-driver"},
 	}
 	if err := c.List(ctx, podList, listOpts...); err != nil {
-		return nil, fmt.Errorf("failed to list pods: %w", err)
+		return nil, "", fmt.Errorf("failed to list pods: %w", err)
 	}
 
 	foundOnNode := false
@@ -1093,17 +1110,17 @@ func getNvidiaDriverDaemonsetPod(ctx context.Context, c client.Client, targetNod
 			}
 			if !podReady {
 				gpusLog.Info("nvidia-driver-daemonset pod is still installing on node", "targetNodeName", targetNodeName, "podName", pod.Name)
-				return nil, fmt.Errorf("nvidia-driver-daemonset pod is not ready on node %s", targetNodeName)
+				return nil, fmt.Sprintf("nvidia-driver-daemonset pod is not ready on node %s", targetNodeName), nil
 			}
-			return pod, nil
+			return pod, "", nil
 		}
 	}
 
 	if !foundOnNode {
-		return nil, fmt.Errorf("nvidia-driver-daemonset pod is not found on node %s", targetNodeName)
+		return nil, fmt.Sprintf("nvidia-driver-daemonset pod is not found on node %s", targetNodeName), nil
 	}
 
-	return nil, fmt.Errorf("nvidia-driver-daemonset pod is not running on node %s", targetNodeName)
+	return nil, fmt.Sprintf("nvidia-driver-daemonset pod is not running on node %s", targetNodeName), nil
 }
 
 func getDRAKubeletPluginPod(ctx context.Context, clientset *kubernetes.Clientset, targetNodeName string) (*corev1.Pod, error) {
@@ -1200,7 +1217,7 @@ exit 0
 func getGPUInfoFromNvidiaPod(ctx context.Context, client client.Client, clientset *kubernetes.Clientset, restConfig *rest.Config, targetNodeName string, queryArgs string) ([]map[string]string, error) {
 	fieldNames := strings.Split(queryArgs, ",")
 
-	nvidiaPod, err := getNvidiaDriverDaemonsetPod(ctx, client, targetNodeName)
+	nvidiaPod, err := requireReadyNvidiaDriverPod(ctx, client, targetNodeName)
 	if err != nil {
 		return nil, err
 	}
