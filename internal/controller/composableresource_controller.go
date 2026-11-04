@@ -27,9 +27,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	crov1alpha1 "github.com/CoHDI/composable-resource-operator/api/v1alpha1"
 	"github.com/CoHDI/composable-resource-operator/internal/cdi"
@@ -45,16 +48,6 @@ type ComposableResourceReconciler struct {
 }
 
 var composableResourceLog = ctrl.Log.WithName("composable_resource_controller")
-
-const defaultNvidiaGpuOperatorNamespace = "gpu-operator"
-
-func nvidiaGpuOperatorNamespace() string {
-	if ns := os.Getenv("NVIDIA_GPU_OPERATOR_NAMESPACE"); ns != "" {
-		return ns
-	}
-	composableResourceLog.Info("NVIDIA_GPU_OPERATOR_NAMESPACE not set, using default", "namespace", defaultNvidiaGpuOperatorNamespace)
-	return defaultNvidiaGpuOperatorNamespace
-}
 
 // +kubebuilder:rbac:groups=cro.hpsys.ibm.ie.com,resources=composableresources,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=cro.hpsys.ibm.ie.com,resources=composableresources/status,verbs=get;update;patch
@@ -223,7 +216,8 @@ func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context,
 
 	deviceResourceType := os.Getenv("DEVICE_RESOURCE_TYPE")
 
-	if err := utils.EnsureGPUDriverExists(ctx, r.Client, r.Clientset, r.RestConfig, resource.Spec.TargetNode); err != nil {
+	driverType, err := utils.DetectGPUDriverType(ctx, r.Client, r.Clientset, r.RestConfig, resource.Spec.TargetNode)
+	if err != nil {
 		return r.requeueOnErr(resource, err, "failed to ensure nvidia driver exists on target node", "TargetNode", resource.Spec.TargetNode, "composableResource", resource.Name)
 	}
 
@@ -254,14 +248,14 @@ func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context,
 			composableResourceLog.Error(err, "failed to check gpu loads in TargetNode", "TargetNode", resource.Spec.TargetNode, "composableResource", resource.Name)
 		}
 
-		if err := utils.RestartDaemonset(ctx, r.Client, nvidiaGpuOperatorNamespace(), "nvidia-device-plugin-daemonset"); err != nil {
+		if err := utils.RestartDaemonset(ctx, r.Client, utils.NvidiaGpuOperatorNamespace(), "nvidia-device-plugin-daemonset"); err != nil {
 			composableResourceLog.Error(err, "failed to restart nvidia-device-plugin-daemonset", "composableResource", resource.Name)
 			resource.Status.Error = err.Error()
 			if err := r.Status().Update(ctx, resource); err != nil {
 				return r.requeueOnErr(resource, err, "failed to update composableResource", "composableResource", resource.Name)
 			}
 		}
-		if err := utils.RestartDaemonset(ctx, r.Client, nvidiaGpuOperatorNamespace(), "nvidia-dcgm"); err != nil {
+		if err := utils.RestartDaemonset(ctx, r.Client, utils.NvidiaGpuOperatorNamespace(), "nvidia-dcgm"); err != nil {
 			composableResourceLog.Error(err, "failed to restart nvidia-dcgm", "composableResource", resource.Name)
 			resource.Status.Error = err.Error()
 			if err := r.Status().Update(ctx, resource); err != nil {
@@ -269,7 +263,23 @@ func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context,
 			}
 		}
 	} else if deviceResourceType == "DRA" {
-		if err := utils.RunNvidiaSmi(ctx, r.Client, r.Clientset, r.RestConfig, resource.Spec.TargetNode); err != nil {
+		if driverType == utils.GPUDriverTypeContainer {
+			pod, reason, err := utils.FindReadyNvidiaDriverPod(ctx, r.Client, resource.Spec.TargetNode)
+			if err != nil {
+				return r.requeueOnErr(resource, err, "failed to check nvidia driver readiness", "composableResource", resource.Name)
+			}
+			if pod == nil {
+				if resource.Status.Error != reason {
+					resource.Status.Error = reason
+					if err := r.Status().Update(ctx, resource); err != nil {
+						return r.requeueOnErr(resource, err, "failed to update composableResource", "composableResource", resource.Name)
+					}
+				}
+				composableResourceLog.Info("waiting for nvidia driver Pod to become ready", "composableResource", resource.Name, "reason", reason)
+				return r.requeueAfter(10*time.Second, nil)
+			}
+		}
+		if err := utils.RunNvidiaSmi(ctx, r.Client, r.Clientset, r.RestConfig, resource.Spec.TargetNode, driverType); err != nil {
 			composableResourceLog.Error(err, "failed to run nvidia-smi", "composableResource", resource.Name)
 			resource.Status.Error = err.Error()
 			if err := r.Status().Update(ctx, resource); err != nil {
@@ -297,7 +307,7 @@ func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context,
 		return ctrl.Result{}, r.Status().Update(ctx, resource)
 	} else {
 		composableResourceLog.Info("waiting for the cluster to recognize the newly added device", "ComposableResource", resource.Name)
-		return r.requeueAfter(30*time.Second, nil)
+		return r.requeueAfter(10*time.Second, nil)
 	}
 }
 
@@ -380,10 +390,10 @@ func (r *ComposableResourceReconciler) handleDetachingState(ctx context.Context,
 
 		// Restart the device plugin / DRA daemonsets to reflect the change.
 		if deviceResourceType == "DEVICE_PLUGIN" {
-			if err := utils.RestartDaemonset(ctx, r.Client, nvidiaGpuOperatorNamespace(), "nvidia-device-plugin-daemonset"); err != nil {
+			if err := utils.RestartDaemonset(ctx, r.Client, utils.NvidiaGpuOperatorNamespace(), "nvidia-device-plugin-daemonset"); err != nil {
 				return r.requeueOnErr(resource, err, "failed to restart nvidia-device-plugin-daemonset", "composableResource", resource.Name)
 			}
-			if err := utils.RestartDaemonset(ctx, r.Client, nvidiaGpuOperatorNamespace(), "nvidia-dcgm"); err != nil {
+			if err := utils.RestartDaemonset(ctx, r.Client, utils.NvidiaGpuOperatorNamespace(), "nvidia-dcgm"); err != nil {
 				return r.requeueOnErr(resource, err, "failed to restart nvidia-dcgm", "composableResource", resource.Name)
 			}
 		} else {
@@ -459,5 +469,8 @@ func (r *ComposableResourceReconciler) doNotRequeue() (ctrl.Result, error) {
 func (r *ComposableResourceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&crov1alpha1.ComposableResource{}).
+		WithOptions(controller.Options{
+			RateLimiter: workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](time.Second, time.Minute),
+		}).
 		Complete(r)
 }
