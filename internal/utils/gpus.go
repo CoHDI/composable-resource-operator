@@ -27,7 +27,6 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
-	v1alpha3 "k8s.io/api/resource/v1alpha3"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -38,6 +37,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	crov1alpha1 "github.com/CoHDI/composable-resource-operator/api/v1alpha1"
+	"github.com/CoHDI/composable-resource-operator/internal/utils/devicetaintrule"
 	gpuv1 "github.com/NVIDIA/gpu-operator/api/v1"
 )
 
@@ -891,16 +891,8 @@ func RunNvidiaSmi(ctx context.Context, c client.Client, clientset *kubernetes.Cl
 	return nil
 }
 
-func CreateDeviceTaint(ctx context.Context, c client.Client, resource *crov1alpha1.ComposableResource) error {
+func CreateDeviceTaint(ctx context.Context, c client.Client, dtrClient devicetaintrule.Interface, resource *crov1alpha1.ComposableResource) error {
 	taintName := fmt.Sprintf("%s-taint", resource.Name)
-
-	existing := &v1alpha3.DeviceTaintRule{}
-	err := c.Get(ctx, client.ObjectKey{Name: taintName}, existing)
-	if err == nil {
-		return nil
-	} else if !apierrors.IsNotFound(err) {
-		return err
-	}
 
 	resourceSliceList := &resourcev1.ResourceSliceList{}
 	if err := c.List(ctx, resourceSliceList); err != nil {
@@ -931,61 +923,27 @@ Loop:
 		return nil
 	}
 
-	taintRule := &v1alpha3.DeviceTaintRule{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: taintName,
-		},
-		Spec: v1alpha3.DeviceTaintRuleSpec{
-			DeviceSelector: &v1alpha3.DeviceTaintSelector{
-				Driver: &driverName,
-				Pool:   &poolName,
-				Device: &deviceName,
-			},
-			Taint: v1alpha3.DeviceTaint{
-				Key:    "k8s.io/device-uuid",
-				Value:  resource.Status.DeviceID,
-				Effect: v1alpha3.DeviceTaintEffectNoSchedule,
-			},
-		},
-	}
-
-	if err := c.Create(ctx, taintRule); err != nil {
-		return fmt.Errorf("failed to create DeviceTaintRule %s: %w", taintName, err)
-	}
-
-	return nil
+	return dtrClient.Create(ctx, taintName, devicetaintrule.TaintSpec{
+		Driver: driverName,
+		Pool:   poolName,
+		Device: deviceName,
+		Key:    "k8s.io/device-uuid",
+		Value:  resource.Status.DeviceID,
+		Effect: "NoSchedule",
+	})
 }
 
-func DeleteDeviceTaint(ctx context.Context, c client.Client, resource *crov1alpha1.ComposableResource) error {
-	taintName := fmt.Sprintf("%s-taint", resource.Name)
-
-	taintRule := &v1alpha3.DeviceTaintRule{}
-	err := c.Get(ctx, client.ObjectKey{Name: taintName}, taintRule)
-	if apierrors.IsNotFound(err) {
-		return nil
-	} else if err != nil {
-		return fmt.Errorf("failed to get DeviceTaintRule %s: %w", taintName, err)
-	}
-
-	if err := c.Delete(ctx, taintRule); err != nil {
-		return fmt.Errorf("failed to delete DeviceTaintRule %s: %w", taintName, err)
-	}
-
-	return nil
+func DeleteDeviceTaint(ctx context.Context, dtrClient devicetaintrule.Interface, resource *crov1alpha1.ComposableResource) error {
+	return dtrClient.Delete(ctx, fmt.Sprintf("%s-taint", resource.Name))
 }
 
-func HasDeviceTaint(ctx context.Context, c client.Client, resource *crov1alpha1.ComposableResource) (bool, error) {
+func HasDeviceTaint(ctx context.Context, dtrClient devicetaintrule.Interface, resource *crov1alpha1.ComposableResource) (bool, error) {
 	taintName := fmt.Sprintf("%s-taint", resource.Name)
-
-	taintRule := &v1alpha3.DeviceTaintRule{}
-	err := c.Get(ctx, client.ObjectKey{Name: taintName}, taintRule)
-	if apierrors.IsNotFound(err) {
-		return false, nil
-	} else if err != nil {
+	exists, err := dtrClient.Exists(ctx, taintName)
+	if err != nil {
 		return false, fmt.Errorf("failed to get DeviceTaintRule %s: %w", taintName, err)
 	}
-
-	return true, nil
+	return exists, nil
 }
 
 // getChrootCacheKey creates a unique cache key for a node/pod combination.

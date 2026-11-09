@@ -37,10 +37,10 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
-	v1alpha3 "k8s.io/api/resource/v1alpha3"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
@@ -52,7 +52,27 @@ import (
 	fticmapi "github.com/CoHDI/composable-resource-operator/internal/cdi/fti/cm/api"
 	ftifmapi "github.com/CoHDI/composable-resource-operator/internal/cdi/fti/fm/api"
 	"github.com/CoHDI/composable-resource-operator/internal/utils"
+	"github.com/CoHDI/composable-resource-operator/internal/utils/devicetaintrule"
 )
+
+// mockDTRClient is a test double for devicetaintrule.Interface that allows
+// injecting errors into Exists calls.
+type mockDTRClient struct {
+	existsErr    error
+	existsResult bool
+}
+
+func (m *mockDTRClient) Create(_ context.Context, _ string, _ devicetaintrule.TaintSpec) error {
+	return nil
+}
+func (m *mockDTRClient) Delete(_ context.Context, _ string) error { return nil }
+func (m *mockDTRClient) Exists(_ context.Context, _ string) (bool, error) {
+	if m.existsErr != nil {
+		return false, m.existsErr
+	}
+	return m.existsResult, nil
+}
+func (m *mockDTRClient) Version() string { return "v1alpha3" }
 
 func createComposableResource(
 	composableResourceName string,
@@ -710,11 +730,18 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 		clientSet, err := kubernetes.NewForConfig(cfg)
 		Expect(err).NotTo(HaveOccurred())
 
+		dynamicClient, err := dynamic.NewForConfig(cfg)
+		Expect(err).NotTo(HaveOccurred())
+
+		dtrClient, err := devicetaintrule.New(dynamicClient, clientSet.Discovery())
+		Expect(err).NotTo(HaveOccurred())
+
 		controllerReconciler = &ComposableResourceReconciler{
-			Client:     k8sClient,
-			Clientset:  clientSet,
-			Scheme:     k8sClient.Scheme(),
-			RestConfig: cfg,
+			Client:                k8sClient,
+			Clientset:             clientSet,
+			Scheme:                k8sClient.Scheme(),
+			RestConfig:            cfg,
+			DeviceTaintRuleClient: dtrClient,
 		}
 
 		namespacesToCreate := []string{
@@ -1133,13 +1160,9 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					}
 				}
 
+				originalDTRClient := controllerReconciler.DeviceTaintRuleClient
 				if tc.injectedGetTaintErr != nil {
-					k8sClient.MockGet = func(ctx context.Context, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
-						if _, ok := obj.(*v1alpha3.DeviceTaintRule); ok && key.Name == fmt.Sprintf("%s-taint", composableResource.Name) {
-							return tc.injectedGetTaintErr
-						}
-						return k8sClient.Client.Get(ctx, key, obj, opts...)
-					}
+					controllerReconciler.DeviceTaintRuleClient = &mockDTRClient{existsErr: tc.injectedGetTaintErr}
 				}
 
 				if tc.injectedDeleteCRErr != nil {
@@ -1176,12 +1199,11 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						Expect(updatedResource.Status).To(Equal(*tc.expectedStatus))
 					}
 
-					taintRule := &v1alpha3.DeviceTaintRule{}
-					taintName := fmt.Sprintf("%s-taint", tc.resourceName)
-					taintErr := k8sClient.Get(ctx, types.NamespacedName{Name: taintName}, taintRule)
-
 					if tc.expectedTaintDeleted {
-						Expect(k8serrors.IsNotFound(taintErr)).To(BeTrue())
+						taintName := fmt.Sprintf("%s-taint", tc.resourceName)
+						exists, taintErr := originalDTRClient.Exists(ctx, taintName)
+						Expect(taintErr).NotTo(HaveOccurred())
+						Expect(exists).To(BeFalse())
 					}
 				}
 
@@ -1190,9 +1212,12 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					k8sClient.MockUpdate = nil
 					k8sClient.MockStatusUpdate = nil
 					k8sClient.MockDelete = nil
+					if originalDTRClient != nil {
+						_ = originalDTRClient.Delete(ctx, fmt.Sprintf("%s-taint", tc.resourceName))
+					}
+					controllerReconciler.DeviceTaintRuleClient = originalDTRClient
 
 					Expect(k8sClient.DeleteAllOf(ctx, &corev1.Node{})).To(Succeed())
-					Expect(k8sClient.DeleteAllOf(ctx, &v1alpha3.DeviceTaintRule{})).To(Succeed())
 
 					cleanAllComposableResources()
 					patches.Reset()
@@ -1305,24 +1330,14 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceState:  "Attaching",
 
 					extraHandling: func(resourceName string) {
-						taintRule := &v1alpha3.DeviceTaintRule{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: fmt.Sprintf("%s-taint", resourceName),
-							},
-							Spec: v1alpha3.DeviceTaintRuleSpec{
-								DeviceSelector: &v1alpha3.DeviceTaintSelector{
-									Driver: ptr.To("test-driver"),
-									Pool:   ptr.To("test-pool"),
-									Device: ptr.To("test-device"),
-								},
-								Taint: v1alpha3.DeviceTaint{
-									Key:    "k8s.io/device-uuid",
-									Value:  "fake-device-id",
-									Effect: v1alpha3.DeviceTaintEffectNoSchedule,
-								},
-							},
-						}
-						Expect(k8sClient.Create(ctx, taintRule)).To(Succeed())
+						Expect(controllerReconciler.DeviceTaintRuleClient.Create(ctx, fmt.Sprintf("%s-taint", resourceName), devicetaintrule.TaintSpec{
+							Driver: "test-driver",
+							Pool:   "test-pool",
+							Device: "test-device",
+							Key:    "k8s.io/device-uuid",
+							Value:  "fake-device-id",
+							Effect: "NoSchedule",
+						})).To(Succeed())
 					},
 
 					expectedStatus: func() *crov1alpha1.ComposableResourceStatus {
@@ -1343,28 +1358,18 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 					resourceState:  "Attaching",
 
 					extraHandling: func(resourceName string) {
-						taintRule := &v1alpha3.DeviceTaintRule{
-							ObjectMeta: metav1.ObjectMeta{
-								Name: fmt.Sprintf("%s-taint", resourceName),
-							},
-							Spec: v1alpha3.DeviceTaintRuleSpec{
-								DeviceSelector: &v1alpha3.DeviceTaintSelector{
-									Driver: ptr.To("test-driver"),
-									Pool:   ptr.To("test-pool"),
-									Device: ptr.To("test-device"),
-								},
-								Taint: v1alpha3.DeviceTaint{
-									Key:    "k8s.io/device-uuid",
-									Value:  "fake-device-id",
-									Effect: v1alpha3.DeviceTaintEffectNoSchedule,
-								},
-							},
-						}
-						Expect(k8sClient.Create(ctx, taintRule)).To(Succeed())
+						Expect(controllerReconciler.DeviceTaintRuleClient.Create(ctx, fmt.Sprintf("%s-taint", resourceName), devicetaintrule.TaintSpec{
+							Driver: "test-driver",
+							Pool:   "test-pool",
+							Device: "test-device",
+							Key:    "k8s.io/device-uuid",
+							Value:  "fake-device-id",
+							Effect: "NoSchedule",
+						})).To(Succeed())
 					},
 
 					setErrorMode: func() {
-						patches.ApplyFunc(utils.DeleteDeviceTaint, func(ctx context.Context, c client.Client, cr *crov1alpha1.ComposableResource) error {
+						patches.ApplyFunc(utils.DeleteDeviceTaint, func(ctx context.Context, dtrClient devicetaintrule.Interface, cr *crov1alpha1.ComposableResource) error {
 							return errors.New("delete device taint fails")
 						})
 					},
