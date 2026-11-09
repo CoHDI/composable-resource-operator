@@ -34,14 +34,16 @@ import (
 	crov1alpha1 "github.com/CoHDI/composable-resource-operator/api/v1alpha1"
 	"github.com/CoHDI/composable-resource-operator/internal/cdi"
 	"github.com/CoHDI/composable-resource-operator/internal/utils"
+	"github.com/CoHDI/composable-resource-operator/internal/utils/devicetaintrule"
 )
 
 // ComposableResourceReconciler reconciles a ComposableResource object
 type ComposableResourceReconciler struct {
 	client.Client
-	Clientset  *kubernetes.Clientset
-	Scheme     *runtime.Scheme
-	RestConfig *rest.Config
+	Clientset             *kubernetes.Clientset
+	Scheme                *runtime.Scheme
+	RestConfig            *rest.Config
+	DeviceTaintRuleClient devicetaintrule.Interface
 }
 
 var composableResourceLog = ctrl.Log.WithName("composable_resource_controller")
@@ -143,10 +145,10 @@ func (r *ComposableResourceReconciler) performGarbageCollection(ctx context.Cont
 		if k8serrors.IsNotFound(err) {
 			composableResourceLog.Info("target node not found, start garbage collecting composableResource", "TargetNode", resource.Spec.TargetNode, "composableResource", resource.Name)
 
-			if hasTaint, err := utils.HasDeviceTaint(ctx, r.Client, resource); err != nil {
+			if hasTaint, err := utils.HasDeviceTaint(ctx, r.DeviceTaintRuleClient, resource); err != nil {
 				return false, err
 			} else if hasTaint {
-				if err := utils.DeleteDeviceTaint(ctx, r.Client, resource); err != nil {
+				if err := utils.DeleteDeviceTaint(ctx, r.DeviceTaintRuleClient, resource); err != nil {
 					return false, err
 				}
 			}
@@ -356,7 +358,7 @@ func (r *ComposableResourceReconciler) handleDetachingState(ctx context.Context,
 
 		// Create a DeviceTaintRule to block the GPU from being re-scheduled.
 		if deviceResourceType == "DRA" {
-			if err := utils.CreateDeviceTaint(ctx, r.Client, resource); err != nil {
+			if err := utils.CreateDeviceTaint(ctx, r.Client, r.DeviceTaintRuleClient, resource); err != nil {
 				return r.requeueOnErr(resource, err, "failed to create DeviceTaintRule", "composableResource", resource.Name)
 			}
 		}
@@ -404,7 +406,7 @@ func (r *ComposableResourceReconciler) handleDetachingState(ctx context.Context,
 
 		// Remove the DeviceTaintRule.
 		if deviceResourceType == "DRA" {
-			if err := utils.DeleteDeviceTaint(ctx, r.Client, resource); err != nil {
+			if err := utils.DeleteDeviceTaint(ctx, r.DeviceTaintRuleClient, resource); err != nil {
 				return r.requeueOnErr(resource, err, "failed to delete DeviceTaintRule", "composableResource", resource.Name)
 			}
 		}

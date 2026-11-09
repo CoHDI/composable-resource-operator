@@ -26,6 +26,7 @@ import (
 	// to ensure that exec-entrypoint and run can make use of them.
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	_ "k8s.io/client-go/plugin/pkg/client/auth"
@@ -38,6 +39,7 @@ import (
 
 	crov1alpha1 "github.com/CoHDI/composable-resource-operator/api/v1alpha1"
 	"github.com/CoHDI/composable-resource-operator/internal/controller"
+	"github.com/CoHDI/composable-resource-operator/internal/utils/devicetaintrule"
 	webhookcrov1alpha1 "github.com/CoHDI/composable-resource-operator/internal/webhook/v1alpha1"
 	gpuv1 "github.com/NVIDIA/gpu-operator/api/v1"
 	metal3v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
@@ -164,6 +166,19 @@ func main() {
 		os.Exit(1)
 	}
 
+	dynamicClient, err := dynamic.NewForConfig(mgr.GetConfig())
+	if err != nil {
+		setupLog.Error(err, "unable to create dynamic client")
+		os.Exit(1)
+	}
+
+	dtrClient, err := devicetaintrule.New(dynamicClient, clientset.Discovery())
+	if err != nil {
+		setupLog.Error(err, "unable to create DeviceTaintRule client")
+		os.Exit(1)
+	}
+	setupLog.Info("DeviceTaintRule client ready", "version", dtrClient.Version())
+
 	if err = (&controller.ComposabilityRequestReconciler{
 		Client:    mgr.GetClient(),
 		Clientset: clientset,
@@ -174,10 +189,11 @@ func main() {
 	}
 
 	if err = (&controller.ComposableResourceReconciler{
-		Client:     mgr.GetClient(),
-		Clientset:  clientset,
-		Scheme:     mgr.GetScheme(),
-		RestConfig: mgr.GetConfig(),
+		Client:                mgr.GetClient(),
+		Clientset:             clientset,
+		Scheme:                mgr.GetScheme(),
+		RestConfig:            mgr.GetConfig(),
+		DeviceTaintRuleClient: dtrClient,
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "ComposableResource")
 		os.Exit(1)
