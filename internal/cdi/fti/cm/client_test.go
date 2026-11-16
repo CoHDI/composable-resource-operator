@@ -1065,3 +1065,24 @@ var _ = Describe("fti/cm client tests", func() {
 		})
 	})
 })
+
+func TestNewFTIClientEndpointScheme(t *testing.T) {
+	tests := []struct {
+		name     string
+		envValue string
+		want     string
+	}{
+		{"with https scheme", "https://cdimgr.localdomain", "cdimgr.localdomain/"},
+		{"without scheme", "cdimgr.localdomain", "cdimgr.localdomain/"},
+		{"without scheme, trailing slash", "cdimgr.localdomain/", "cdimgr.localdomain/"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("FTI_CDI_ENDPOINT", tt.envValue)
+			c := NewFTIClient(context.Background(), nil, nil)
+			if c.compositionServiceEndpoint != tt.want {
+				t.Errorf("compositionServiceEndpoint = %q, want %q", c.compositionServiceEndpoint, tt.want)
+			}
+		})
+	}
+}
