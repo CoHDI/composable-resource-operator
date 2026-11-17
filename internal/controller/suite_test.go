@@ -22,7 +22,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"testing"
 	"time"
 
@@ -35,10 +34,12 @@ import (
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apiextensionsclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
@@ -50,7 +51,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	crov1alpha1 "github.com/CoHDI/composable-resource-operator/api/v1alpha1"
-	v1alpha3 "k8s.io/api/resource/v1alpha3"
+	"github.com/CoHDI/composable-resource-operator/internal/utils/devicetaintrule"
 	// +kubebuilder:scaffold:imports
 )
 
@@ -362,21 +363,8 @@ var _ = BeforeSuite(func() {
 		},
 		ErrorIfCRDPathMissing: true,
 
-		// The BinaryAssetsDirectory is only required if you want to run the tests directly
-		// without call the makefile target test. If not informed it will look for the
-		// default path defined in controller-runtime which is /usr/local/kubebuilder/.
-		// Note that you must have the required binaries setup under the bin directory to perform
-		// the tests directly. When we run make test it will be setup and used automatically.
-		BinaryAssetsDirectory: filepath.Join("..", "..", "bin", "k8s",
-			fmt.Sprintf("1.33.0-%s-%s", runtime.GOOS, runtime.GOARCH)),
-		ControlPlane: envtest.ControlPlane{
-			APIServer: &envtest.APIServer{
-				Args: []string{
-					"--feature-gates=DynamicResourceAllocation=true",
-					"--runtime-config=resource.k8s.io/v1alpha3=true",
-				},
-			},
-		},
+		// Leave BinaryAssetsDirectory unset so envtest honors KUBEBUILDER_ASSETS
+		// from `make test`. That path is prepared for ENVTEST_K8S_VERSION (1.37+).
 	}
 
 	var err error
@@ -391,7 +379,6 @@ var _ = BeforeSuite(func() {
 	Expect(crov1alpha1.AddToScheme(s)).NotTo(HaveOccurred())
 	Expect(machinev1beta1.AddToScheme(s)).NotTo(HaveOccurred())
 	Expect(metal3v1alpha1.AddToScheme(s)).NotTo(HaveOccurred())
-	Expect(v1alpha3.AddToScheme(s)).NotTo(HaveOccurred())
 	Expect(gpuv1.AddToScheme(s)).NotTo(HaveOccurred())
 	// +kubebuilder:scaffold:scheme
 
@@ -408,4 +395,153 @@ var _ = AfterSuite(func() {
 	cancel()
 	err := testEnv.Stop()
 	Expect(err).NotTo(HaveOccurred())
+})
+
+func envtestAssetsDir(envVar string) string {
+	dir := os.Getenv(envVar)
+	if dir == "" {
+		Skip(fmt.Sprintf("%s is not set; run 'make envtest-assets' or 'make test' to download Kubernetes envtest binaries", envVar))
+	}
+	return dir
+}
+
+func startVersionedEnvtest(assetsEnv string, apiServerArgs []string) (*envtest.Environment, *rest.Config) {
+	assetsDir := envtestAssetsDir(assetsEnv)
+	// Pin binary paths. envtest prefers KUBEBUILDER_ASSETS over BinaryAssetsDirectory,
+	// and `make test` sets that to the 1.37+ assets used by BeforeSuite.
+	localEnv := &envtest.Environment{
+		BinaryAssetsDirectory: assetsDir,
+		ControlPlane: envtest.ControlPlane{
+			APIServer: &envtest.APIServer{
+				Path: filepath.Join(assetsDir, "kube-apiserver"),
+				Args: apiServerArgs,
+			},
+			Etcd: &envtest.Etcd{
+				Path: filepath.Join(assetsDir, "etcd"),
+			},
+			KubectlPath: filepath.Join(assetsDir, "kubectl"),
+		},
+	}
+	localCfg, err := localEnv.Start()
+	Expect(err).NotTo(HaveOccurred())
+	return localEnv, localCfg
+}
+
+func expectDeviceTaintRuleVersion(restCfg *rest.Config, version string) {
+	dynamicClient, err := dynamic.NewForConfig(restCfg)
+	Expect(err).NotTo(HaveOccurred())
+	clientset, err := kubernetes.NewForConfig(restCfg)
+	Expect(err).NotTo(HaveOccurred())
+	dtrClient, err := devicetaintrule.New(dynamicClient, clientset.Discovery())
+	Expect(err).NotTo(HaveOccurred())
+	Expect(dtrClient.Version()).To(Equal(version))
+}
+
+// DeviceTaintRule version selection tests cover:
+//   - v1.37+ control plane (existing cfg from BeforeSuite / KUBEBUILDER_ASSETS) → v1
+//   - v1.36 with v1beta2 registered and DRADeviceTaintRules on → v1beta2
+//   - v1.36 with DRADeviceTaintRules off, both v1beta2 and v1alpha3 registered → v1beta2
+//   - v1.36 with DRADeviceTaintRules off, only v1alpha3 registered → v1alpha3
+//   - v1.35 (v1alpha3 only) → v1alpha3
+//
+// Extra control planes use ENVTEST_ASSETS_1_35 / ENVTEST_ASSETS_1_36 from `make test`.
+var _ = Describe("DeviceTaintRule version selection", func() {
+	Describe("against a v1.37+", func() {
+		It("should select v1 as the preferred API version", func() {
+			expectDeviceTaintRuleVersion(cfg, "v1")
+		})
+	})
+
+	Describe("against a v1.36 when DRADeviceTaintRules feature gate is enabled", Ordered, func() {
+		var (
+			localEnv *envtest.Environment
+			localCfg *rest.Config
+		)
+
+		BeforeAll(func() {
+			localEnv, localCfg = startVersionedEnvtest("ENVTEST_ASSETS_1_36", []string{
+				"--feature-gates=DRADeviceTaintRules=true",
+				"--runtime-config=resource.k8s.io/v1beta2=true",
+			})
+		})
+
+		AfterAll(func() {
+			if localEnv != nil {
+				Expect(localEnv.Stop()).To(Succeed())
+			}
+		})
+
+		It("should select v1beta2 as the API version", func() {
+			expectDeviceTaintRuleVersion(localCfg, "v1beta2")
+		})
+	})
+
+	Describe("against a v1.36 when DRADeviceTaintRules disabled and v1beta2/v1alpha3 registered", Ordered, func() {
+		var (
+			localEnv *envtest.Environment
+			localCfg *rest.Config
+		)
+
+		BeforeAll(func() {
+			localEnv, localCfg = startVersionedEnvtest("ENVTEST_ASSETS_1_36", []string{
+				"--runtime-config=resource.k8s.io/v1beta2=true,resource.k8s.io/v1alpha3=true",
+			})
+		})
+
+		AfterAll(func() {
+			if localEnv != nil {
+				Expect(localEnv.Stop()).To(Succeed())
+			}
+		})
+
+		It("should select v1beta2 as the API version", func() {
+			expectDeviceTaintRuleVersion(localCfg, "v1beta2")
+		})
+	})
+
+	Describe("against a v1.36 when DRADeviceTaintRules disabled and only v1alpha3 registered", Ordered, func() {
+		var (
+			localEnv *envtest.Environment
+			localCfg *rest.Config
+		)
+
+		BeforeAll(func() {
+			localEnv, localCfg = startVersionedEnvtest("ENVTEST_ASSETS_1_36", []string{
+				"--runtime-config=resource.k8s.io/v1alpha3=true",
+			})
+		})
+
+		AfterAll(func() {
+			if localEnv != nil {
+				Expect(localEnv.Stop()).To(Succeed())
+			}
+		})
+
+		It("should fall back to v1alpha3 as the API version", func() {
+			expectDeviceTaintRuleVersion(localCfg, "v1alpha3")
+		})
+	})
+
+	Describe("against a v1.35", Ordered, func() {
+		var (
+			localEnv *envtest.Environment
+			localCfg *rest.Config
+		)
+
+		BeforeAll(func() {
+			localEnv, localCfg = startVersionedEnvtest("ENVTEST_ASSETS_1_35", []string{
+				"--runtime-config=resource.k8s.io/v1alpha3=true",
+			})
+		})
+
+		AfterAll(func() {
+			if localEnv != nil {
+				Expect(localEnv.Stop()).To(Succeed())
+			}
+		})
+
+		It("should select v1alpha3 as the API version", func() {
+			expectDeviceTaintRuleVersion(localCfg, "v1alpha3")
+		})
+	})
 })

@@ -51,8 +51,14 @@ endif
 OPERATOR_SDK_VERSION ?= v1.39.1
 # Image URL to use all building/pushing image targets
 IMG ?= controller:latest
-# ENVTEST_K8S_VERSION refers to the version of kubebuilder assets to be downloaded by envtest binary.
-ENVTEST_K8S_VERSION = 1.34.0
+# ENVTEST_K8S_VERSION is the default Kubernetes version used by envtest
+# (KUBEBUILDER_ASSETS). Extra versions are downloaded so DeviceTaintRule
+# discovery can be exercised against 1.35, 1.36, and 1.37+.
+ENVTEST_K8S_VERSION ?= 1.37.0
+ENVTEST_K8S_VERSION_1_35 ?= 1.35.0
+ENVTEST_K8S_VERSION_1_36 ?= 1.36.0
+ENVTEST_K8S_VERSION_1_37 ?= 1.37.0
+ENVTEST_K8S_VERSIONS ?= $(ENVTEST_K8S_VERSION_1_35) $(ENVTEST_K8S_VERSION_1_36) $(ENVTEST_K8S_VERSION_1_37)
 
 # Get the currently used golang install path (in GOPATH/bin, unless GOBIN is set)
 ifeq (,$(shell go env GOBIN))
@@ -115,9 +121,20 @@ fmt: ## Run go fmt against code.
 vet: ## Run go vet against code.
 	go vet ./...
 
+.PHONY: envtest-assets
+envtest-assets: envtest ## Download envtest binaries for all tested Kubernetes versions.
+	@for v in $(ENVTEST_K8S_VERSIONS); do \
+		echo "Downloading envtest assets for Kubernetes $$v"; \
+		$(ENVTEST) use $$v --bin-dir $(LOCALBIN); \
+	done
+
 .PHONY: test
-test: manifests generate fmt vet envtest download-test-crds ## Run tests.
-	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
+test: manifests generate fmt vet envtest-assets download-test-crds ## Run tests.
+	KUBEBUILDER_ASSETS="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(LOCALBIN) -p path)" \
+	ENVTEST_ASSETS_1_35="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION_1_35) --bin-dir $(LOCALBIN) -p path)" \
+	ENVTEST_ASSETS_1_36="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION_1_36) --bin-dir $(LOCALBIN) -p path)" \
+	ENVTEST_ASSETS_1_37="$(shell $(ENVTEST) use $(ENVTEST_K8S_VERSION_1_37) --bin-dir $(LOCALBIN) -p path)" \
+	go test $$(go list ./... | grep -v /e2e) -coverprofile cover.out
 
 # Utilize Kind or modify the e2e tests to load the image locally, enabling compatibility with other vendors.
 .PHONY: test-e2e  # Run the e2e tests against a Kind k8s instance that is spun up.

@@ -24,12 +24,12 @@ import (
 	"testing"
 
 	crov1alpha1 "github.com/CoHDI/composable-resource-operator/api/v1alpha1"
+	"github.com/CoHDI/composable-resource-operator/internal/utils/devicetaintrule"
 	gpuv1 "github.com/NVIDIA/gpu-operator/api/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
-	v1alpha3 "k8s.io/api/resource/v1alpha3"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -86,8 +86,45 @@ func testComposableResource(deviceUUID string) *crov1alpha1.ComposableResource {
 		ObjectMeta: metav1.ObjectMeta{Name: "gpu-0"},
 		Status:     crov1alpha1.ComposableResourceStatus{DeviceID: deviceUUID},
 		Spec:       crov1alpha1.ComposableResourceSpec{TargetNode: "worker-1"},
-		
 	}
+}
+
+type fakeDeviceTaintClient struct {
+	created map[string]devicetaintrule.TaintSpec
+	deleted map[string]bool
+	exists  map[string]bool
+}
+
+func newFakeDeviceTaintClient(existing ...string) *fakeDeviceTaintClient {
+	c := &fakeDeviceTaintClient{
+		created: map[string]devicetaintrule.TaintSpec{},
+		deleted: map[string]bool{},
+		exists:  map[string]bool{},
+	}
+	for _, name := range existing {
+		c.exists[name] = true
+	}
+	return c
+}
+
+func (f *fakeDeviceTaintClient) Create(_ context.Context, name string, spec devicetaintrule.TaintSpec) error {
+	f.created[name] = spec
+	f.exists[name] = true
+	return nil
+}
+
+func (f *fakeDeviceTaintClient) Delete(_ context.Context, name string) error {
+	f.deleted[name] = true
+	delete(f.exists, name)
+	return nil
+}
+
+func (f *fakeDeviceTaintClient) Exists(_ context.Context, name string) (bool, error) {
+	return f.exists[name], nil
+}
+
+func (f *fakeDeviceTaintClient) Version() string {
+	return "fake"
 }
 
 var _ = Describe("GPU utility functions", func() {
@@ -100,14 +137,13 @@ var _ = Describe("GPU utility functions", func() {
 		scheme = runtime.NewScheme()
 		Expect(corev1.AddToScheme(scheme)).To(Succeed())
 		Expect(resourcev1.AddToScheme(scheme)).To(Succeed())
-		Expect(v1alpha3.AddToScheme(scheme)).To(Succeed())
 		Expect(gpuv1.AddToScheme(scheme)).To(Succeed())
 		Expect(crov1alpha1.AddToScheme(scheme)).To(Succeed())
 	})
 	Describe("AccountedAppInfo", func() {
 		It("returns formated add info", func() {
 			acc_app_info := AccountedAppInfo{
-				GPUUUID: "123456789",
+				GPUUUID:     "123456789",
 				ProcessName: "process1",
 			}
 			result := acc_app_info.String()
@@ -227,7 +263,7 @@ var _ = Describe("GPU utility functions", func() {
 			Expect(err.Error()).To(ContainSubstring("Kubernetes clientset or REST config is nil. Cannot check the host NVIDIA driver"))
 		})
 	})
-	
+
 	Describe("CheckGPUVisible", func() {
 		It("return true when GPU is visible (device resource type DRA)", func() {
 			deviceUUID := "device-uuid"
@@ -277,19 +313,19 @@ var _ = Describe("GPU utility functions", func() {
 				WithObjects(resourceSlice).
 				Build()
 
+			dtrClient := newFakeDeviceTaintClient()
 			resource := testComposableResource(deviceUUID)
 
-			Expect(CreateDeviceTaint(ctx, c, resource)).To(Succeed())
+			Expect(CreateDeviceTaint(ctx, c, dtrClient, resource)).To(Succeed())
 
-			taintRule := &v1alpha3.DeviceTaintRule{}
-			Expect(c.Get(ctx, client.ObjectKey{Name: "gpu-0-taint"}, taintRule)).To(Succeed())
-			Expect(taintRule.Spec.DeviceSelector.Driver).To(HaveValue(Equal("nvidia")))
-			Expect(taintRule.Spec.DeviceSelector.Pool).To(HaveValue(Equal("test1")))
-			Expect(taintRule.Spec.DeviceSelector.Device).To(HaveValue(Equal("gpu-0")))
-			Expect(taintRule.Spec.Taint).To(Equal(v1alpha3.DeviceTaint{
+			Expect(dtrClient.created).To(HaveKey("gpu-0-taint"))
+			Expect(dtrClient.created["gpu-0-taint"]).To(Equal(devicetaintrule.TaintSpec{
+				Driver: "nvidia",
+				Pool:   "test1",
+				Device: "gpu-0",
 				Key:    "k8s.io/device-uuid",
 				Value:  deviceUUID,
-				Effect: v1alpha3.DeviceTaintEffectNoSchedule,
+				Effect: "NoSchedule",
 			}))
 		})
 		It("skip creating DeviceTaintRule:", func() {
@@ -309,69 +345,58 @@ var _ = Describe("GPU utility functions", func() {
 				WithScheme(scheme).
 				WithObjects(resourceSlice).
 				Build()
-
+			dtrClient := newFakeDeviceTaintClient()
 			resource := testComposableResource(deviceUUID)
 
-			result := CreateDeviceTaint(ctx, c, resource)
-
-			Expect(result).To(BeNil())
+			Expect(CreateDeviceTaint(ctx, c, dtrClient, resource)).To(Succeed())
+			Expect(dtrClient.created).To(BeEmpty())
 		})
-		
 	})
 
 	Describe("DeleteDeviceTaint", func() {
 		It("delete the DeviceTaintRule", func() {
-			taintRule := &v1alpha3.DeviceTaintRule{
-				ObjectMeta: metav1.ObjectMeta{Name: "gpu-0-taint"},
-			}
-			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(taintRule).Build()
+			dtrClient := newFakeDeviceTaintClient("gpu-0-taint")
 			resource := &crov1alpha1.ComposableResource{
 				ObjectMeta: metav1.ObjectMeta{Name: "gpu-0"},
 			}
 
-			Expect(DeleteDeviceTaint(ctx, c, resource)).To(Succeed())
-
-			err := c.Get(ctx, client.ObjectKey{Name: "gpu-0-taint"}, &v1alpha3.DeviceTaintRule{})
-			Expect(apierrors.IsNotFound(err)).To(BeTrue())
+			Expect(DeleteDeviceTaint(ctx, dtrClient, resource)).To(Succeed())
+			Expect(dtrClient.deleted).To(HaveKey("gpu-0-taint"))
+			Expect(dtrClient.exists["gpu-0-taint"]).To(BeFalse())
 		})
 		It("DeviceTaintRule not exists", func() {
-			c := fake.NewClientBuilder().WithScheme(scheme).Build()
+			dtrClient := newFakeDeviceTaintClient()
 			resource := &crov1alpha1.ComposableResource{
 				ObjectMeta: metav1.ObjectMeta{Name: "gpu-0"},
 			}
 
-			Expect(DeleteDeviceTaint(ctx, c, resource)).To(Succeed())
-
-			err := c.Get(ctx, client.ObjectKey{Name: "gpu-0-taint"}, &v1alpha3.DeviceTaintRule{})
-			Expect(apierrors.IsNotFound(err)).To(BeTrue())
+			Expect(DeleteDeviceTaint(ctx, dtrClient, resource)).To(Succeed())
+			Expect(dtrClient.deleted).To(HaveKey("gpu-0-taint"))
 		})
 	})
 
 	Describe("HasDeviceTaint", func() {
 		It("returns true when the DeviceTaintRule exists", func() {
-			c := fake.NewClientBuilder().
-				WithScheme(scheme).
-				WithObjects(&v1alpha3.DeviceTaintRule{ObjectMeta: metav1.ObjectMeta{Name: "gpu-0-taint"}}).
-				Build()
+			dtrClient := newFakeDeviceTaintClient("gpu-0-taint")
 			resource := &crov1alpha1.ComposableResource{ObjectMeta: metav1.ObjectMeta{Name: "gpu-0"}}
 
-			hasTaint, err := HasDeviceTaint(ctx, c, resource)
+			hasTaint, err := HasDeviceTaint(ctx, dtrClient, resource)
 
 			Expect(err).NotTo(HaveOccurred())
 			Expect(hasTaint).To(BeTrue())
 		})
 
 		It("returns false when the DeviceTaintRule does not exist", func() {
-			c := fake.NewClientBuilder().WithScheme(scheme).Build()
+			dtrClient := newFakeDeviceTaintClient()
 			resource := &crov1alpha1.ComposableResource{ObjectMeta: metav1.ObjectMeta{Name: "gpu-0"}}
 
-			hasTaint, err := HasDeviceTaint(ctx, c, resource)
+			hasTaint, err := HasDeviceTaint(ctx, dtrClient, resource)
 
 			Expect(err).NotTo(HaveOccurred())
 			Expect(hasTaint).To(BeFalse())
 		})
-
 	})
+
 	Describe("getChrootCacheKey", func() {
 		It("returns ChrootCacheKey", func() {
 			pod := testPod("worker-1", corev1.PodRunning, corev1.ConditionTrue)
