@@ -1520,6 +1520,127 @@ var _ = Describe("ComposabilityRequest Controller", Ordered, func() {
 				expectedUsedComposableResources: []string{composableResource0Name},
 				expectedUsedNodes:               []string{worker0Name},
 			}),
+			Entry("should remove the mismatched ComposableResource CR when there are extra ComposableResource CRs", testcase{
+				requestName: "test-composability-request",
+				requestSpec: func() *crov1alpha1.ComposabilityRequestSpec {
+					composabilityRequestSpec := baseComposabilityRequest.Spec.DeepCopy()
+					composabilityRequestSpec.Resource.Size = 1
+					return composabilityRequestSpec
+				}(),
+				requestStatus: baseComposabilityRequest.Status.DeepCopy(),
+
+				extraHandling: func(composabilityRequestName string) {
+					// composableResource0 matches the request, but it is listed first and has the oldest last-used time.
+					createTempComposableResource(
+						composabilityRequestName,
+						composableResource0Name,
+						baseComposabilityRequest.Spec.Resource.Type,
+						baseComposabilityRequest.Spec.Resource.Model,
+						worker0Name,
+						baseComposabilityRequest.Spec.Resource.ForceDetach,
+					)
+					resource0 := &crov1alpha1.ComposableResource{}
+					Expect(k8sClient.Get(ctx, types.NamespacedName{Name: composableResource0Name}, resource0)).NotTo(HaveOccurred())
+					resource0.SetAnnotations(map[string]string{
+						"cohdi.io/last-used-time": "2023-10-27T10:30:00Z",
+					})
+					Expect(k8sClient.Update(ctx, resource0)).NotTo(HaveOccurred())
+
+					// composableResource1 has a different model, so it must be removed regardless of its deletion priority.
+					createTempComposableResource(
+						composabilityRequestName,
+						composableResource1Name,
+						baseComposabilityRequest.Spec.Resource.Type,
+						"NVIDIA-H100-PCIE-80GB",
+						worker0Name,
+						baseComposabilityRequest.Spec.Resource.ForceDetach,
+					)
+					resource1 := &crov1alpha1.ComposableResource{}
+					Expect(k8sClient.Get(ctx, types.NamespacedName{Name: composableResource1Name}, resource1)).NotTo(HaveOccurred())
+					resource1.SetAnnotations(map[string]string{
+						"cohdi.io/last-used-time": "2023-10-27T12:30:00Z",
+					})
+					Expect(k8sClient.Update(ctx, resource1)).NotTo(HaveOccurred())
+				},
+
+				expectedUsedComposableResources: []string{composableResource0Name},
+				expectedUsedNodes:               []string{worker0Name},
+			}),
+			Entry("should not keep more ComposableResource CRs than the size when a mismatched ComposableResource CR exists", testcase{
+				requestName: "test-composability-request",
+				requestSpec: func() *crov1alpha1.ComposabilityRequestSpec {
+					composabilityRequestSpec := baseComposabilityRequest.Spec.DeepCopy()
+					composabilityRequestSpec.Resource.Size = 1
+					return composabilityRequestSpec
+				}(),
+				requestStatus: func() *crov1alpha1.ComposabilityRequestStatus {
+					composabilityRequestStatus := baseComposabilityRequest.Status.DeepCopy()
+					composabilityRequestStatus.Resources[composableResource2Name] = crov1alpha1.ScalarResourceStatus{
+						NodeName: worker0Name,
+					}
+					return composabilityRequestStatus
+				}(),
+
+				extraHandling: func(composabilityRequestName string) {
+					// composableResource0 has a different model and the oldest last-used time.
+					createTempComposableResource(
+						composabilityRequestName,
+						composableResource0Name,
+						baseComposabilityRequest.Spec.Resource.Type,
+						"NVIDIA-H100-PCIE-80GB",
+						worker0Name,
+						baseComposabilityRequest.Spec.Resource.ForceDetach,
+					)
+					resource0 := &crov1alpha1.ComposableResource{}
+					Expect(k8sClient.Get(ctx, types.NamespacedName{Name: composableResource0Name}, resource0)).NotTo(HaveOccurred())
+					resource0.SetAnnotations(map[string]string{
+						"cohdi.io/last-used-time": "2023-10-27T08:30:00Z",
+					})
+					Expect(k8sClient.Update(ctx, resource0)).NotTo(HaveOccurred())
+
+					createTempComposableResource(
+						composabilityRequestName,
+						composableResource1Name,
+						baseComposabilityRequest.Spec.Resource.Type,
+						baseComposabilityRequest.Spec.Resource.Model,
+						worker0Name,
+						baseComposabilityRequest.Spec.Resource.ForceDetach,
+					)
+					resource1 := &crov1alpha1.ComposableResource{}
+					Expect(k8sClient.Get(ctx, types.NamespacedName{Name: composableResource1Name}, resource1)).NotTo(HaveOccurred())
+					resource1.SetAnnotations(map[string]string{
+						"cohdi.io/last-used-time": "2023-10-27T10:30:00Z",
+					})
+					Expect(k8sClient.Update(ctx, resource1)).NotTo(HaveOccurred())
+
+					createTempComposableResource(
+						composabilityRequestName,
+						composableResource2Name,
+						baseComposabilityRequest.Spec.Resource.Type,
+						baseComposabilityRequest.Spec.Resource.Model,
+						worker0Name,
+						baseComposabilityRequest.Spec.Resource.ForceDetach,
+					)
+					resource2 := &crov1alpha1.ComposableResource{}
+					Expect(k8sClient.Get(ctx, types.NamespacedName{Name: composableResource2Name}, resource2)).NotTo(HaveOccurred())
+					resource2.SetAnnotations(map[string]string{
+						"cohdi.io/last-used-time": "2023-10-27T12:30:00Z",
+					})
+					Expect(k8sClient.Update(ctx, resource2)).NotTo(HaveOccurred())
+				},
+
+				expectedUsedComposableResources: []string{composableResource2Name},
+				expectedUsedNodes:               []string{worker0Name},
+			}),
+			Entry("should drop resources without ComposableResource CRs from the status", testcase{
+				requestName: "test-composability-request",
+				requestSpec: baseComposabilityRequest.Spec.DeepCopy(),
+				// The status lists composableResource0 and composableResource1, but their ComposableResource CRs have not been created yet.
+				requestStatus: baseComposabilityRequest.Status.DeepCopy(),
+
+				expectedDeletedComposableResources: []string{composableResource0Name, composableResource1Name},
+				expectedUsedNodes:                  []string{worker0Name, worker0Name},
+			}),
 			Entry("should succeed when there are ComposabilityRequests existed", testcase{
 				requestName: "test-composability-request",
 				requestSpec: baseComposabilityRequest.Spec.DeepCopy(),
