@@ -82,6 +82,9 @@ func NewFTIClient(ctx context.Context, client client.Client, clientSet *kubernet
 	tenantID := os.Getenv("FTI_CDI_TENANT_ID")
 	clusterID := os.Getenv("FTI_CDI_CLUSTER_ID")
 
+	// The scheme is prepended when building requests, so accept the endpoint with or without one.
+	endpoint = strings.TrimPrefix(endpoint, "https://")
+
 	if !strings.HasSuffix(endpoint, "/") {
 		endpoint += "/"
 	}
