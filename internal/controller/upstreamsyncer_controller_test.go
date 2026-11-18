@@ -166,7 +166,6 @@ var _ = Describe("Upstreamsyncer Controller", Ordered, func() {
 			reconciler = &UpstreamSyncerReconciler{
 				Client:         k8sClient,
 				ClientSet:      clientSet,
-				RestConfig:     cfg,
 				Scheme:         scheme.Scheme,
 				missingDevices: make(map[string]time.Time),
 			}

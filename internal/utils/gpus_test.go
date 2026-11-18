@@ -33,6 +33,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -86,7 +87,6 @@ func testComposableResource(deviceUUID string) *crov1alpha1.ComposableResource {
 		ObjectMeta: metav1.ObjectMeta{Name: "gpu-0"},
 		Status:     crov1alpha1.ComposableResourceStatus{DeviceID: deviceUUID},
 		Spec:       crov1alpha1.ComposableResourceSpec{TargetNode: "worker-1"},
-		
 	}
 }
 
@@ -107,7 +107,7 @@ var _ = Describe("GPU utility functions", func() {
 	Describe("AccountedAppInfo", func() {
 		It("returns formated add info", func() {
 			acc_app_info := AccountedAppInfo{
-				GPUUUID: "123456789",
+				GPUUUID:     "123456789",
 				ProcessName: "process1",
 			}
 			result := acc_app_info.String()
@@ -135,30 +135,51 @@ var _ = Describe("GPU utility functions", func() {
 		})
 	})
 
-	Describe("EnsureGPUDriverExists", func() {
-		It("returns nil when an NVIDIA driver pod exists on the target node", func() {
-			pod := testPod("worker-1", corev1.PodRunning, corev1.ConditionTrue)
-			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(pod).Build()
+	Describe("EnsureGPUDriverEnabled", func() {
+		It("returns nil when the driver is enabled", func() {
+			policy := &gpuv1.ClusterPolicy{
+				ObjectMeta: metav1.ObjectMeta{Name: "gpu-cluster-policy"},
+				Spec:       gpuv1.ClusterPolicySpec{Driver: gpuv1.DriverSpec{Enabled: ptr.To(true)}},
+			}
+			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(policy).Build()
 
-			err := EnsureGPUDriverExists(ctx, c, nil, nil, "worker-1")
+			err := EnsureGPUDriverEnabled(ctx, c)
+
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		It("returns an error when no driver or ClusterPolicy exists", func() {
-			c := fake.NewClientBuilder().WithScheme(scheme).Build()
+		It("returns an error when the driver is disabled", func() {
+			policy := &gpuv1.ClusterPolicy{
+				ObjectMeta: metav1.ObjectMeta{Name: "gpu-cluster-policy"},
+				Spec:       gpuv1.ClusterPolicySpec{Driver: gpuv1.DriverSpec{Enabled: ptr.To(false)}},
+			}
+			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(policy).Build()
 
-			err := EnsureGPUDriverExists(ctx, c, nil, nil, "worker-1")
-			Expect(err).To(HaveOccurred())
-			Expect(err.Error()).To(ContainSubstring("ClusterPolicy CR was not found. Please install GPU Operator"))
+			err := EnsureGPUDriverEnabled(ctx, c)
+
+			Expect(err).To(MatchError("NVIDIA driver is not enabled. Please set ClusterPolicy's driver.enabled to true"))
 		})
-	})
-	Describe("DetectGPUDriverType", func() {
+
+		It("returns the ClusterPolicy API error", func() {
+			listErr := errors.New("failed to retrieve ClusterPolicy")
+			c := fake.NewClientBuilder().WithScheme(scheme).
+				WithInterceptorFuncs(interceptor.Funcs{
+					List: func(context.Context, client.WithWatch, client.ObjectList, ...client.ListOption) error {
+						return listErr
+					},
+				}).Build()
+
+			err := EnsureGPUDriverEnabled(ctx, c)
+
+			Expect(err).To(MatchError("failed to get ClusterPolicy: failed to retrieve ClusterPolicy"))
+			Expect(errors.Is(err, listErr)).To(BeTrue())
+		})
+
 		It("returns a GPU Operator installation error when no ClusterPolicy exists", func() {
 			c := fake.NewClientBuilder().WithScheme(scheme).Build()
 
-			driverType, err := DetectGPUDriverType(ctx, c, nil, nil, "worker-1")
+			err := EnsureGPUDriverEnabled(ctx, c)
 
-			Expect(driverType).To(Equal(GPUDriverTypeNone))
 			Expect(err).To(HaveOccurred())
 			Expect(apierrors.IsNotFound(err)).To(BeTrue())
 			Expect(err.Error()).To(ContainSubstring("ClusterPolicy CR was not found. Please install GPU Operator:"))
@@ -192,42 +213,6 @@ var _ = Describe("GPU utility functions", func() {
 			Expect(apierrors.IsNotFound(err)).To(BeTrue())
 		})
 	})
-	Describe("hasNvidiaDriverDaemonsetPod", func() {
-		It("returns true when an NVIDIA driver pod is on the target node", func() {
-			pod := testPod("worker-1", corev1.PodRunning, corev1.ConditionTrue)
-			c := fake.NewClientBuilder().
-				WithScheme(scheme).
-				WithObjects(pod).
-				Build()
-
-			found, err := hasNvidiaDriverDaemonsetPod(ctx, c, "worker-1")
-
-			Expect(err).NotTo(HaveOccurred())
-			Expect(found).To(BeTrue())
-		})
-		It("returns false when an NVIDIA driver pod is not on the target node", func() {
-			pod := testPod("worker-2", corev1.PodRunning, corev1.ConditionTrue)
-			c := fake.NewClientBuilder().
-				WithScheme(scheme).
-				WithObjects(pod).
-				Build()
-
-			found, err := hasNvidiaDriverDaemonsetPod(ctx, c, "worker-1")
-
-			Expect(err).NotTo(HaveOccurred())
-			Expect(found).To(BeFalse())
-		})
-	})
-	Describe("hasHostNvidiaProcDriver", func() {
-		It("returns error when clientset or REST config is nil.", func() {
-			result, err := hasHostNvidiaProcDriver(ctx, nil, nil, "worker-1")
-
-			Expect(err).To(HaveOccurred())
-			Expect(result).To(BeFalse())
-			Expect(err.Error()).To(ContainSubstring("Kubernetes clientset or REST config is nil. Cannot check the host NVIDIA driver"))
-		})
-	})
-	
 	Describe("CheckGPUVisible", func() {
 		It("return true when GPU is visible (device resource type DRA)", func() {
 			deviceUUID := "device-uuid"
@@ -316,7 +301,7 @@ var _ = Describe("GPU utility functions", func() {
 
 			Expect(result).To(BeNil())
 		})
-		
+
 	})
 
 	Describe("DeleteDeviceTaint", func() {

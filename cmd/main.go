@@ -184,10 +184,9 @@ func main() {
 	}
 
 	if err = (&controller.UpstreamSyncerReconciler{
-		Client:     mgr.GetClient(),
-		ClientSet:  clientset,
-		RestConfig: mgr.GetConfig(),
-		Scheme:     mgr.GetScheme(),
+		Client:    mgr.GetClient(),
+		ClientSet: clientset,
+		Scheme:    mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "UpstreamSyncer")
 		os.Exit(1)
