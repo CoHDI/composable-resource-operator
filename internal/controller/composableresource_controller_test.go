@@ -31,6 +31,7 @@ import (
 	"testing"
 	"time"
 
+	gpuv1 "github.com/NVIDIA/gpu-operator/api/v1"
 	"github.com/agiledragon/gomonkey/v2"
 	metal3v1alpha1 "github.com/metal3-io/baremetal-operator/apis/metal3.io/v1alpha1"
 	. "github.com/onsi/ginkgo/v2"
@@ -2542,8 +2543,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				}),
 				Entry("should wait without an error and remain Attaching when the nvidia-driver-daemonset pod cannot be found", testcase{
 					expectedResult: &reconcile.Result{RequeueAfter: 10 * time.Second},
-					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
-					cluster_uuid: "cluster0-uuid-temp-0000-000000000001",
+					tenant_uuid:    "tenant00-uuid-temp-0000-000000000000",
+					cluster_uuid:   "cluster0-uuid-temp-0000-000000000001",
 
 					resourceName:   "test-composable-resource",
 					resourceSpec:   baseComposableResource.Spec.DeepCopy(),
@@ -9822,6 +9823,11 @@ func TestHandleAttachingStateDriverReadiness(t *testing.T) {
 			testScheme := runtime.NewScheme()
 			g.Expect(corev1.AddToScheme(testScheme)).To(Succeed())
 			g.Expect(crov1alpha1.AddToScheme(testScheme)).To(Succeed())
+			g.Expect(gpuv1.AddToScheme(testScheme)).To(Succeed())
+			policy := &gpuv1.ClusterPolicy{
+				ObjectMeta: metav1.ObjectMeta{Name: "gpu-cluster-policy"},
+				Spec:       gpuv1.ClusterPolicySpec{Driver: gpuv1.DriverSpec{Enabled: ptr.To(true)}},
+			}
 			resource := &crov1alpha1.ComposableResource{
 				ObjectMeta: metav1.ObjectMeta{Name: "driver-readiness-test"},
 				Spec:       crov1alpha1.ComposableResourceSpec{TargetNode: "worker-1"},
@@ -9831,10 +9837,10 @@ func TestHandleAttachingStateDriverReadiness(t *testing.T) {
 			}
 			updates := 0
 			builder := fake.NewClientBuilder().WithScheme(testScheme).
-				WithStatusSubresource(resource).WithObjects(resource).
+				WithStatusSubresource(resource).WithObjects(resource, policy).
 				WithInterceptorFuncs(interceptor.Funcs{
 					List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
-						if tc.listFails {
+						if _, isPodList := list.(*corev1.PodList); isPodList && tc.listFails {
 							return listErr
 						}
 						return c.List(ctx, list, opts...)
@@ -9865,9 +9871,8 @@ func TestHandleAttachingStateDriverReadiness(t *testing.T) {
 			g.Expect(c.Get(testCtx, client.ObjectKeyFromObject(resource), resource)).To(Succeed())
 			patches := gomonkey.NewPatches()
 			defer patches.Reset()
-			patches.ApplyFuncReturn(utils.DetectGPUDriverType, utils.GPUDriverTypeContainer, nil)
 			var subsequentCalls []string
-			patches.ApplyFunc(utils.RunNvidiaSmi, func(context.Context, client.Client, *kubernetes.Clientset, *rest.Config, string, utils.GPUDriverType) error {
+			patches.ApplyFunc(utils.RunNvidiaSmi, func(context.Context, client.Client, *kubernetes.Clientset, *rest.Config, string) error {
 				subsequentCalls = append(subsequentCalls, "RunNvidiaSmi")
 				return nil
 			})
