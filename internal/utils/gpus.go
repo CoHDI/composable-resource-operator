@@ -24,7 +24,6 @@ import (
 	"os"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -70,14 +69,6 @@ var (
 	chrootPathMutex sync.Mutex
 )
 
-type GPUDriverType string
-
-const (
-	GPUDriverTypeNone      GPUDriverType = "none"
-	GPUDriverTypeHost      GPUDriverType = "host"
-	GPUDriverTypeContainer GPUDriverType = "container"
-)
-
 type AccountedAppInfo struct {
 	GPUUUID     string
 	ProcessName string
@@ -94,47 +85,20 @@ func NvidiaGpuOperatorNamespace() string {
 	return defaultNvidiaGpuOperatorNamespace
 }
 
-func EnsureGPUDriverExists(ctx context.Context, c client.Client, clientset *kubernetes.Clientset, restConfig *rest.Config, targetNodeName string) error {
-	driverType, err := DetectGPUDriverType(ctx, c, clientset, restConfig, targetNodeName)
-	if err != nil {
-		return err
-	}
-	if driverType == GPUDriverTypeNone {
-		return fmt.Errorf("no nvidia driver found on node %s", targetNodeName)
-	}
-	return nil
-}
-
-func DetectGPUDriverType(ctx context.Context, c client.Client, clientset *kubernetes.Clientset, restConfig *rest.Config, targetNodeName string) (GPUDriverType, error) {
-	hasNvidiaDriverPod, err := hasNvidiaDriverDaemonsetPod(ctx, c, targetNodeName)
-	if err != nil {
-		return GPUDriverTypeNone, err
-	}
-	if hasNvidiaDriverPod {
-		return GPUDriverTypeContainer, nil
-	}
-
+func EnsureGPUDriverEnabled(ctx context.Context, c client.Client) error {
 	clusterPolicy, err := getClusterPolicy(ctx, c)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			return GPUDriverTypeNone, fmt.Errorf("ClusterPolicy CR was not found. Please install GPU Operator: %w", err)
+			return fmt.Errorf("ClusterPolicy CR was not found. Please install GPU Operator: %w", err)
 		}
-		return GPUDriverTypeNone, fmt.Errorf("failed to get ClusterPolicy: %w", err)
+		return fmt.Errorf("failed to get ClusterPolicy: %w", err)
 	}
 
 	if clusterPolicy.Spec.Driver.IsDriverEnabled() {
-		return GPUDriverTypeContainer, nil
+		return nil
 	}
 
-	hasHostDriver, err := hasHostNvidiaProcDriver(ctx, clientset, restConfig, targetNodeName)
-	if err != nil {
-		return GPUDriverTypeNone, err
-	}
-	if hasHostDriver {
-		return GPUDriverTypeHost, nil
-	}
-
-	return GPUDriverTypeNone, fmt.Errorf("NVIDIA driver was not found. If ClusterPolicy's driver.enabled is false, please install the NVIDIA driver on the host OS")
+	return fmt.Errorf("NVIDIA driver is not enabled. Please set ClusterPolicy's driver.enabled to true")
 }
 
 func getClusterPolicy(ctx context.Context, c client.Client) (*gpuv1.ClusterPolicy, error) {
@@ -148,71 +112,6 @@ func getClusterPolicy(ctx context.Context, c client.Client) (*gpuv1.ClusterPolic
 	}
 
 	return &clusterPolicyList.Items[0], nil
-}
-
-func hasNvidiaDriverDaemonsetPod(ctx context.Context, c client.Client, targetNodeName string) (bool, error) {
-	podList := &corev1.PodList{}
-	listOpts := []client.ListOption{
-		client.InNamespace(NvidiaGpuOperatorNamespace()),
-		client.MatchingLabels{"app.kubernetes.io/component": "nvidia-driver"},
-	}
-	if err := c.List(ctx, podList, listOpts...); err != nil {
-		return false, fmt.Errorf("failed to list nvidia-driver-daemonset pods: %w", err)
-	}
-
-	for i := range podList.Items {
-		if podList.Items[i].Spec.NodeName == targetNodeName {
-			return true, nil
-		}
-	}
-
-	return false, nil
-}
-
-func hasHostNvidiaProcDriver(ctx context.Context, clientset *kubernetes.Clientset, restConfig *rest.Config, targetNodeName string) (bool, error) {
-	if clientset == nil || restConfig == nil {
-		return false, fmt.Errorf("Kubernetes clientset or REST config is nil. Cannot check the host NVIDIA driver")
-	}
-
-	hasCroNodeAgentDS, err := hasCroNodeAgentDaemonset(ctx, clientset)
-	if err != nil {
-		return false, err
-	}
-	if !hasCroNodeAgentDS {
-		return false, fmt.Errorf("cro-node-agent daemonset was not found. When running with driver.enabled=false, the cro-node-agent daemonset must be deployed. Please check the helm chart option deployPrivilegedAgent")
-	}
-
-	pod, err := getCroNodeAgentPod(ctx, clientset, targetNodeName)
-	if err != nil {
-		return false, err
-	}
-
-	stdOut, stdErr, execErr := execCommandInPod(
-		ctx,
-		clientset,
-		restConfig,
-		pod.Namespace,
-		pod.Name,
-		pod.Spec.Containers[0].Name,
-		[]string{"/bin/chroot", "/host-root", "/bin/sh", "-c", "if /usr/sbin/modinfo nvidia > /dev/null 2>&1; then echo true; fi"},
-	)
-	if stdErr != "" || execErr != nil {
-		return false, fmt.Errorf("failed to check host nvidia driver module: '%v', stderr: '%s', stdout: '%s'", execErr, stdErr, stdOut)
-	}
-
-	return strings.TrimSpace(stdOut) == "true", nil
-}
-
-func hasCroNodeAgentDaemonset(ctx context.Context, clientset *kubernetes.Clientset) (bool, error) {
-	_, err := clientset.AppsV1().DaemonSets("composable-resource-operator-system").Get(ctx, "cro-node-agent", metav1.GetOptions{})
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return false, nil
-		}
-		return false, fmt.Errorf("failed to get cro-node-agent daemonset composable-resource-operator-system/cro-node-agent: %v", err)
-	}
-
-	return true, nil
 }
 
 func CheckGPUVisible(ctx context.Context, client client.Client, clientset *kubernetes.Clientset, restConfig *rest.Config, deviceResourceType string, resource *crov1alpha1.ComposableResource) (bool, error) {
@@ -251,70 +150,20 @@ func CheckGPUVisible(ctx context.Context, client client.Client, clientset *kuber
 
 func CheckNoGPULoads(ctx context.Context, c client.Client, clientset *kubernetes.Clientset, restConfig *rest.Config, targetNodeName string, targetGPUUUID *string) error {
 
-	driverType, err := DetectGPUDriverType(ctx, c, clientset, restConfig, targetNodeName)
-	if err != nil {
+	if err := EnsureGPUDriverEnabled(ctx, c); err != nil {
 		return err
 	}
 
-	var (
-		pod     *corev1.Pod
-		command []string
-	)
-
-	switch driverType {
-	case GPUDriverTypeHost:
-
-		pod, err = getCroNodeAgentPod(ctx, clientset, targetNodeName)
-		if err != nil {
-			return err
+	pod, err := requireReadyNvidiaDriverPod(ctx, c, targetNodeName)
+	if err != nil {
+		if strings.Contains(err.Error(), "nvidia-driver-daemonset pod is not found") {
+			gpusLog.Info("nvidia-driver-daemonset Pod is not found, it means that there is no GPU on the node, so there is no load, skip it", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
+			return nil
 		}
-
-		if targetGPUUUID != nil {
-			// Get information from /proc about the GPU to be drained.
-			gpuInfosForProc, err := getGPUInfoFromProc(
-				ctx,
-				clientset,
-				restConfig,
-				pod,
-				targetNodeName,
-				"gpu_uuid",
-				"/bin/chroot",
-				"/host-root",
-				"no GPUs detected via /proc scan",
-				"Successfully got GPU info from DRA pod",
-			)
-			if err != nil {
-				return err
-			}
-			foundGPU := false
-			for _, gpuInfo := range gpuInfosForProc {
-				if gpuInfo["gpu_uuid"] == *targetGPUUUID {
-					foundGPU = true
-					break
-				}
-			}
-			if !foundGPU {
-				gpusLog.Info("target GPU UUID was not found in the list of GPUs under /proc. It has already been reset, so there is no load, skip it", "targetNodeName", targetNodeName, "targetGPUUUID", *targetGPUUUID)
-				return nil
-			}
-		}
-
-		command = []string{"/bin/chroot", "/host-root", "/usr/bin/nvidia-smi", "--query-compute-apps=gpu_uuid,process_name", "--format=csv,noheader,nounits"}
-	case GPUDriverTypeContainer:
-		pod, err = requireReadyNvidiaDriverPod(ctx, c, targetNodeName)
-		if err != nil {
-			if strings.Contains(err.Error(), "nvidia-driver-daemonset pod is not found") {
-				gpusLog.Info("nvidia-driver-daemonset Pod is not found, it means that there is no GPU on the node, so there is no load, skip it", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
-				return nil
-			}
-			return err
-		}
-
-		command = []string{"/usr/bin/nvidia-smi", "--query-compute-apps=gpu_uuid,process_name", "--format=csv,noheader,nounits"}
-	default:
-		gpusLog.Info("no nvidia driver found on node, so there is no gpu load to check, skip it", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
-		return nil
+		return err
 	}
+
+	command := []string{"/usr/bin/nvidia-smi", "--query-compute-apps=gpu_uuid,process_name", "--format=csv,noheader,nounits"}
 
 	stdOut, stdErr, execErr := execCommandInPod(
 		ctx,
@@ -355,7 +204,7 @@ func CheckNoGPULoads(ctx context.Context, c client.Client, clientset *kubernetes
 			return fmt.Errorf("found gpu load on gpu '%s': %v", appInfo.GPUUUID, accountedApps)
 		}
 	}
-	gpusLog.Info("no gpu loads found", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID, "driverType", driverType)
+	gpusLog.Info("no gpu loads found", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
 
 	return nil
 }
@@ -363,312 +212,105 @@ func CheckNoGPULoads(ctx context.Context, c client.Client, clientset *kubernetes
 func DrainGPU(ctx context.Context, c client.Client, clientset *kubernetes.Clientset, restConfig *rest.Config, targetNodeName string, targetGPUUUID string, deviceResourceType string) error {
 	gpusLog.Info("start draining gpu", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
 
-	driverType, err := DetectGPUDriverType(ctx, c, clientset, restConfig, targetNodeName)
-	if err != nil {
+	if err := EnsureGPUDriverEnabled(ctx, c); err != nil {
 		return err
 	}
 
-	if driverType == GPUDriverTypeNone {
-		gpusLog.Info("no nvidia driver found on node, so no need to drain gpu, skip it", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
-		return nil
-	}
-
 	if deviceResourceType == "DRA" {
-		if driverType == GPUDriverTypeHost {
-			// RKE2 + DRA
-
-			// Get cro-node-agent Pod.
-			draPod, err := getCroNodeAgentPod(ctx, clientset, targetNodeName)
-			if err != nil {
+		// OCP (K8S) + DRA
+		nvidiaPod, err := requireReadyNvidiaDriverPod(ctx, c, targetNodeName)
+		if err != nil {
+			if !strings.Contains(err.Error(), "nvidia-driver-daemonset pod is not found") {
 				return err
 			}
 
-			// Get information from /proc about the GPU to be drained.
-			gpuInfosForProc, err := getGPUInfoFromProc(
-				ctx,
-				clientset,
-				restConfig,
-				draPod,
-				targetNodeName,
-				"device_minor,gpu_uuid,pci.bus_id",
-				"/bin/chroot",
-				"/host-root",
-				"no GPUs detected via /proc scan",
-				"Successfully got GPU info from DRA pod",
-			)
-			if err != nil {
-				return err
+			// If the nvidia-driver-daemonset Pod is not found and GPU labels are gone from the target node, the GPU has already been drained.
+			checkNodeLabels, checkNodeLabelsErr := clientset.CoreV1().Nodes().Get(ctx, targetNodeName, metav1.GetOptions{})
+			if checkNodeLabelsErr != nil {
+				return checkNodeLabelsErr
 			}
-			foundGPU := false
-			targetGPUDeviceMinor := ""
-			targetGPUBusID := ""
-			for _, gpuInfo := range gpuInfosForProc {
-				if gpuInfo["gpu_uuid"] == targetGPUUUID {
-					targetGPUDeviceMinor = gpuInfo["device_minor"]
-					targetGPUBusID = strings.ToUpper(strings.TrimSpace(gpuInfo["pci.bus_id"]))
-					foundGPU = true
-					break
-				}
-			}
-			if !foundGPU {
-				gpusLog.Info("target GPU UUID was not found in the list of GPUs under /proc. It has already been reset, so no need to drain, skip it", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
-				return nil
-			}
-			gpusLog.Info("find the gpu bus id", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID, "targetGPUBusID", targetGPUBusID, "targetGPUDeviceMinor", targetGPUDeviceMinor)
-
-			// Get the GPU drain status.
-			isDraining := false
-			isDraining, err = checkGPUDrainStatus(ctx, clientset, restConfig, draPod, targetNodeName, targetGPUBusID, driverType)
-			if err != nil {
-				return err
-			}
-
-			// Check that /dev/nvidiaX is not open.
-			checkShell := `
-TARGET_FILE="/dev/nvidia` + targetGPUDeviceMinor + `";
-MATCHING_LINKS=$(/usr/bin/find -L /proc/[0-9]*/fd -maxdepth 1 -samefile "$TARGET_FILE" -print 2>/dev/null)
-
-if [ -n "$MATCHING_LINKS" ]; then
-  FIRST=1
-  echo "$MATCHING_LINKS" | while IFS= read -r LINK; do
-    [ -n "$LINK" ] || continue
-
-    PID=${LINK#/proc/}
-    PID=${PID%%/*}
-
-    CMD_NAME=$(/usr/bin/cat "/proc/$PID/comm" 2>/dev/null) || continue
-
-    if [ "$FIRST" = 1 ]; then
-      FIRST=0
-    else
-      /usr/bin/printf ", "
-    fi
-
-    /usr/bin/printf "%s %s" "$PID" "$CMD_NAME"
-  done
-fi
-`
-
-			// Execute a common detach process regardless of the number of GPUs.
-			disableCommand := []struct {
-				cmd  []string
-				desc string
-			}{
-				{[]string{"/bin/chroot", "/host-root", "/usr/bin/nvidia-smi", "-i", targetGPUUUID, "-pm", "0"}, "disable persistence mode"}, //If GPU drain status is draining, skip
-				{[]string{"/bin/chroot", "/host-root", "/bin/sh", "-c", checkShell}, "check /dev/nvidiaX"},
-				{[]string{"/bin/chroot", "/host-root", "/usr/bin/nvidia-smi", "drain", "-p", targetGPUBusID, "-m", "1"}, "set maintenance mode"}, //If GPU drain status is draining, skip
-				{[]string{"/bin/chroot", "/host-root", "/usr/bin/rm", "-f", "/dev/nvidia" + targetGPUDeviceMinor}, "remove file /dev/nvidiaX"},
-			}
-			for _, step := range disableCommand {
-				if isDraining && (step.desc == "disable persistence mode" || step.desc == "set maintenance mode") {
-					gpusLog.Info("GPU is already in draining status, skip the step", "step", step.desc, "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
-					continue
-				}
-				stdOut, stdErr, execErr := execCommandInPod(
-					ctx,
-					clientset,
-					restConfig,
-					draPod.Namespace,
-					draPod.Name,
-					draPod.Spec.Containers[0].Name,
-					step.cmd,
-				)
-				if execErr != nil || stdErr != "" {
-					return fmt.Errorf("deatch command '%s' failed: '%v', stderr: '%s', stdout: '%s'", step.desc, execErr, stdErr, stdOut)
-				}
-				if step.desc == "check /dev/nvidiaX" && stdOut != "" {
-					return fmt.Errorf("check /dev/nvidiaX command failed: /dev/nvidiaX is in use by one or more processes: %s", stdOut)
-				}
-			}
-
-			// Check the number of GPUs
-			theLeftGPU := false
-			if len(gpuInfosForProc) == 1 {
-				theLeftGPU = true
-			}
-
-			// If not the last GPU.
-			if !theLeftGPU {
-
-				// Detach gpu with nvidia-smi command.
-				stdOut, stdErr, execErr := execCommandInPod(
-					ctx,
-					clientset,
-					restConfig,
-					draPod.Namespace,
-					draPod.Name,
-					draPod.Spec.Containers[0].Name,
-					[]string{"/bin/chroot", "/host-root", "/usr/bin/nvidia-smi", "drain", "-p", targetGPUBusID, "-r"},
-				)
-				if execErr != nil || stdErr != "" {
-					return fmt.Errorf("detach command 'reset GPU' failed: '%v', stderr: '%s', stdout: '%s'", execErr, stdErr, stdOut)
-				}
-				gpusLog.Info("detach command 'reset GPU' completed, so it successfully drained the GPU", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
-
-			} else {
-
-				// Check and remove nvidia driver modules as needed
-				if err := removeNvidiaDriverModule(ctx, clientset, restConfig, draPod, targetNodeName, targetGPUUUID); err != nil {
-					return err
-				}
-
-				// Check if the 'reset GPU' command is still running
-				busIDForSysfs := strings.ToLower(targetGPUBusID)
-				isStillRunning, err := checkResetGPUCommandStillRunning(ctx, clientset, restConfig, draPod, targetNodeName, busIDForSysfs)
-				if err != nil {
-					return err
-				}
-
-				// If the tee command has not been executed yet, execute the tee command in another thread
-				var isResetGPUCommandError atomic.Bool
-				if !isStillRunning {
-					gpusLog.Info("detach command 'reset GPU' not detected, so execute 'reset GPU' command", "targetNodeName", targetNodeName, "targetBusID", busIDForSysfs)
-					go func() {
-						stdOut, stdErr, execErr := execCommandInPod(
-							ctx,
-							clientset,
-							restConfig,
-							draPod.Namespace,
-							draPod.Name,
-							draPod.Spec.Containers[0].Name,
-							[]string{"/bin/chroot", "/host-root", "/bin/sh", "-c", fmt.Sprintf("/usr/bin/echo 1 | /usr/bin/tee /sys/bus/pci/devices/%s/remove > /dev/null", busIDForSysfs)},
-						)
-						if execErr != nil || stdErr != "" {
-							isResetGPUCommandError.Store(true)
-							errToLog := fmt.Errorf("failed to execute 'echo 1 | tee /sys/bus/pci/devices/%s/remove'", busIDForSysfs)
-							gpusLog.Error(errToLog, "detach command 'reset GPU' failed", "execErr", execErr, "stderr", stdErr, "stdout", stdOut)
-						}
-					}()
-				} else {
-					gpusLog.Info("detach command 'reset GPU' detected, so skip execute 'reset GPU' command", "targetNodeName", targetNodeName, "targetBusID", busIDForSysfs)
-				}
-
-				// Check and remove nvidia driver modules as needed
-				if err := removeNvidiaDriverModule(ctx, clientset, restConfig, draPod, targetNodeName, targetGPUUUID); err != nil {
-					return err
-				}
-
-				time.Sleep(1 * time.Second)
-
-				// Check if the 'reset GPU' command is still running
-				isStillRunning, err = checkResetGPUCommandStillRunning(ctx, clientset, restConfig, draPod, targetNodeName, busIDForSysfs)
-				if err != nil {
-					return err
-				}
-				if !isStillRunning {
-					gpusLog.Info("detach command 'reset GPU' not found", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
-				} else {
-					errToLog := fmt.Errorf("failed to complete 'echo 1 | tee /sys/bus/pci/devices/%s/remove'", busIDForSysfs)
-					gpusLog.Error(errToLog, "detach command 'reset GPU' is still running", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
-				}
-
-				if !isStillRunning && !isResetGPUCommandError.Load() {
-					gpusLog.Info("detach command 'reset GPU' completed, so it successfully drained the last GPU", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID, "'reset GPU'command still running", isStillRunning, "'reset GPU'command error", isResetGPUCommandError.Load())
-				} else {
-					return fmt.Errorf(
-						"detach command 'reset GPU' did not complete, so it failed to drain the last GPU: targetNodeName=%s, targetGPUUUID=%s, resetCommandRunning=%t, resetCommandError=%t",
-						targetNodeName,
-						targetGPUUUID,
-						isStillRunning,
-						isResetGPUCommandError.Load(),
-					)
-				}
-			}
-		} else if driverType == GPUDriverTypeContainer {
-			// OCP (K8S) + DRA
-			nvidiaPod, err := requireReadyNvidiaDriverPod(ctx, c, targetNodeName)
-			if err != nil {
-				if !strings.Contains(err.Error(), "nvidia-driver-daemonset pod is not found") {
-					return err
-				}
-
-				// If the nvidia-driver-daemonset Pod is not found and GPU labels are gone from the target node, the GPU has already been drained.
-				checkNodeLabels, checkNodeLabelsErr := clientset.CoreV1().Nodes().Get(ctx, targetNodeName, metav1.GetOptions{})
-				if checkNodeLabelsErr != nil {
-					return checkNodeLabelsErr
-				}
-				hasPciLabel := checkNodeLabels.Labels["feature.node.kubernetes.io/pci-10de.present"] == "true"
-				hasGpuLabel := checkNodeLabels.Labels["nvidia.com/gpu.present"] == "true"
-				if !hasPciLabel && !hasGpuLabel {
-					gpusLog.Info("GPU labels not present or 'false' on the target node (feature.node.kubernetes.io/pci-10de.present=true and nvidia.com/gpu.present=true not found). Drain is not required; skipping.", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
-					return nil
-				}
-
-				return err
-			}
-			if err := killNvidiaPersistencedInDriverPod(ctx, clientset, restConfig, nvidiaPod); err != nil {
-				return err
-			}
-
-			// Resolve the chroot command path once and reuse it
-			chrootCmd, err := resolveChrootCommand(ctx, clientset, restConfig, nvidiaPod, targetNodeName)
-			if err != nil {
-				return err
-			}
-
-			// Get information about the GPU to be drained.
-			gpuInfos, err := getGPUInfoFromProc(
-				ctx,
-				clientset,
-				restConfig,
-				nvidiaPod,
-				targetNodeName,
-				"device_minor,gpu_uuid,pci.bus_id",
-				chrootCmd,
-				nvidiaDriverRoot,
-				"no GPUs detected via nvidia-driver-daemonset driver root proc scan",
-				"Successfully got GPU info from nvidia-driver-daemonset driver root",
-			)
-			if err != nil {
-				return err
-			}
-
-			targetGPUDeviceMinor := ""
-			targetGPUBusID := ""
-			for _, gpuInfo := range gpuInfos {
-				if gpuInfo["gpu_uuid"] == targetGPUUUID {
-					targetGPUDeviceMinor = gpuInfo["device_minor"]
-					targetGPUBusID = strings.ToUpper(strings.TrimSpace(gpuInfo["pci.bus_id"]))
-					break
-				}
-			}
-			if targetGPUBusID == "" {
-				// It can be considered to have been drained, so no error is required.
-				gpusLog.Info("cannot find the gpu bus id, it should have been drained", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
+			hasPciLabel := checkNodeLabels.Labels["feature.node.kubernetes.io/pci-10de.present"] == "true"
+			hasGpuLabel := checkNodeLabels.Labels["nvidia.com/gpu.present"] == "true"
+			if !hasPciLabel && !hasGpuLabel {
+				gpusLog.Info("GPU labels not present or 'false' on the target node (feature.node.kubernetes.io/pci-10de.present=true and nvidia.com/gpu.present=true not found). Drain is not required; skipping.", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
 				return nil
 			}
 
-			gpusLog.Info("find the gpu bus id", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID, "targetGPUBusID", targetGPUBusID, "targetGPUDeviceMinor", targetGPUDeviceMinor)
+			return err
+		}
+		if err := killNvidiaPersistencedInDriverPod(ctx, clientset, restConfig, nvidiaPod); err != nil {
+			return err
+		}
 
-			// Get the GPU drain status.
-			isDraining, err := checkGPUDrainStatus(ctx, clientset, restConfig, nvidiaPod, targetNodeName, targetGPUBusID, driverType)
-			if err != nil {
-				return err
+		// Resolve the chroot command path once and reuse it
+		chrootCmd, err := resolveChrootCommand(ctx, clientset, restConfig, nvidiaPod, targetNodeName)
+		if err != nil {
+			return err
+		}
+
+		// Get information about the GPU to be drained.
+		gpuInfos, err := getGPUInfoFromProc(
+			ctx,
+			clientset,
+			restConfig,
+			nvidiaPod,
+			targetNodeName,
+			"device_minor,gpu_uuid,pci.bus_id",
+			chrootCmd,
+			nvidiaDriverRoot,
+			"no GPUs detected via nvidia-driver-daemonset driver root proc scan",
+			"Successfully got GPU info from nvidia-driver-daemonset driver root",
+		)
+		if err != nil {
+			return err
+		}
+
+		targetGPUDeviceMinor := ""
+		targetGPUBusID := ""
+		for _, gpuInfo := range gpuInfos {
+			if gpuInfo["gpu_uuid"] == targetGPUUUID {
+				targetGPUDeviceMinor = gpuInfo["device_minor"]
+				targetGPUBusID = strings.ToUpper(strings.TrimSpace(gpuInfo["pci.bus_id"]))
+				break
 			}
+		}
+		if targetGPUBusID == "" {
+			// It can be considered to have been drained, so no error is required.
+			gpusLog.Info("cannot find the gpu bus id, it should have been drained", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
+			return nil
+		}
 
-			// Disable gpu with nvidia-smi command. It should be executed in nvidia-driver-daemonset Pod.
-			if !isDraining {
-				stdOut, stdErr, execErr := execCommandInPod(
-					ctx,
-					clientset,
-					restConfig,
-					nvidiaPod.Namespace,
-					nvidiaPod.Name,
-					nvidiaPod.Spec.Containers[0].Name,
-					[]string{chrootCmd, nvidiaDriverRoot, "/usr/bin/nvidia-smi", "-i", targetGPUUUID, "-pm", "0"},
-				)
-				if execErr != nil || stdErr != "" {
-					if strings.Contains(stdOut, "No devices were found") {
-						gpusLog.Info("GPU is not found for nvidia-smi -i command, skip it", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
-					} else {
-						return fmt.Errorf("deatch command 'disable persistence mode' failed: '%v', stderr: '%s', stdout: '%s'", execErr, stdErr, stdOut)
-					}
+		gpusLog.Info("find the gpu bus id", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID, "targetGPUBusID", targetGPUBusID, "targetGPUDeviceMinor", targetGPUDeviceMinor)
+
+		// Get the GPU drain status.
+		isDraining, err := checkGPUDrainStatus(ctx, clientset, restConfig, nvidiaPod, targetNodeName, targetGPUBusID)
+		if err != nil {
+			return err
+		}
+
+		// Disable gpu with nvidia-smi command. It should be executed in nvidia-driver-daemonset Pod.
+		if !isDraining {
+			stdOut, stdErr, execErr := execCommandInPod(
+				ctx,
+				clientset,
+				restConfig,
+				nvidiaPod.Namespace,
+				nvidiaPod.Name,
+				nvidiaPod.Spec.Containers[0].Name,
+				[]string{chrootCmd, nvidiaDriverRoot, "/usr/bin/nvidia-smi", "-i", targetGPUUUID, "-pm", "0"},
+			)
+			if execErr != nil || stdErr != "" {
+				if strings.Contains(stdOut, "No devices were found") {
+					gpusLog.Info("GPU is not found for nvidia-smi -i command, skip it", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
+				} else {
+					return fmt.Errorf("deatch command 'disable persistence mode' failed: '%v', stderr: '%s', stdout: '%s'", execErr, stdErr, stdOut)
 				}
-			} else {
-				gpusLog.Info("GPU is already in draining status, skip the step", "step", "disable persistence mode", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
 			}
+		} else {
+			gpusLog.Info("GPU is already in draining status, skip the step", "step", "disable persistence mode", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
+		}
 
-			checkNvidiaShell := `
+		checkNvidiaShell := `
 TARGET_FILE="/dev/nvidia` + targetGPUDeviceMinor + `";
 for PID_DIR in /proc/[0-9]*; do
 	PID=$(/usr/bin/basename "$PID_DIR");
@@ -684,24 +326,38 @@ for PID_DIR in /proc/[0-9]*; do
 		fi;
 	done;
 done;
-			`
-			checkNvidiaCommand := []string{chrootCmd, nvidiaDriverRoot, "sh", "-c", checkNvidiaShell}
-			stdOut, stdErr, execErr := execCommandInPod(
-				ctx,
-				clientset,
-				restConfig,
-				nvidiaPod.Namespace,
-				nvidiaPod.Name,
-				nvidiaPod.Spec.Containers[0].Name,
-				checkNvidiaCommand,
-			)
-			if stdErr != "" || execErr != nil {
-				return fmt.Errorf("check /dev/nvidiaX command in nvidia-driver-daemonset driver root failed: '%v', stderr: '%s'", execErr, stdErr)
-			}
-			if stdOut != "" {
-				return fmt.Errorf("check /dev/nvidiaX command in nvidia-driver-daemonset driver root failed: there is a process %s occupied the nvidiaX file", stdOut)
-			}
+		`
+		checkNvidiaCommand := []string{chrootCmd, nvidiaDriverRoot, "sh", "-c", checkNvidiaShell}
+		stdOut, stdErr, execErr := execCommandInPod(
+			ctx,
+			clientset,
+			restConfig,
+			nvidiaPod.Namespace,
+			nvidiaPod.Name,
+			nvidiaPod.Spec.Containers[0].Name,
+			checkNvidiaCommand,
+		)
+		if stdErr != "" || execErr != nil {
+			return fmt.Errorf("check /dev/nvidiaX command in nvidia-driver-daemonset driver root failed: '%v', stderr: '%s'", execErr, stdErr)
+		}
+		if stdOut != "" {
+			return fmt.Errorf("check /dev/nvidiaX command in nvidia-driver-daemonset driver root failed: there is a process %s occupied the nvidiaX file", stdOut)
+		}
 
+		stdOut, stdErr, execErr = execCommandInPod(
+			ctx,
+			clientset,
+			restConfig,
+			nvidiaPod.Namespace,
+			nvidiaPod.Name,
+			nvidiaPod.Spec.Containers[0].Name,
+			[]string{chrootCmd, nvidiaDriverRoot, "/usr/bin/rm", "-f", "/dev/nvidia" + targetGPUDeviceMinor},
+		)
+		if execErr != nil || stdErr != "" {
+			return fmt.Errorf("delete device file command 'remove file /dev/nvidiaX' failed: '%v', stderr: '%s', stdout: '%s'", execErr, stdErr, stdOut)
+		}
+
+		if !isDraining {
 			stdOut, stdErr, execErr = execCommandInPod(
 				ctx,
 				clientset,
@@ -709,54 +365,36 @@ done;
 				nvidiaPod.Namespace,
 				nvidiaPod.Name,
 				nvidiaPod.Spec.Containers[0].Name,
-				[]string{chrootCmd, nvidiaDriverRoot, "/usr/bin/rm", "-f", "/dev/nvidia" + targetGPUDeviceMinor},
+				[]string{chrootCmd, nvidiaDriverRoot, "/usr/bin/nvidia-smi", "drain", "-p", targetGPUBusID, "-m", "1"},
 			)
 			if execErr != nil || stdErr != "" {
-				return fmt.Errorf("delete device file command 'remove file /dev/nvidiaX' failed: '%v', stderr: '%s', stdout: '%s'", execErr, stdErr, stdOut)
-			}
-
-			if !isDraining {
-				stdOut, stdErr, execErr = execCommandInPod(
-					ctx,
-					clientset,
-					restConfig,
-					nvidiaPod.Namespace,
-					nvidiaPod.Name,
-					nvidiaPod.Spec.Containers[0].Name,
-					[]string{chrootCmd, nvidiaDriverRoot, "/usr/bin/nvidia-smi", "drain", "-p", targetGPUBusID, "-m", "1"},
-				)
-				if execErr != nil || stdErr != "" {
-					return fmt.Errorf("detach command 'set maintenance mode' failed: '%v', stderr: '%s', stdout: '%s'", execErr, stdErr, stdOut)
-				}
-			} else {
-				gpusLog.Info("GPU is already in draining status, skip the step", "step", "set maintenance mode", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
-			}
-
-			isVM := isVMByCPUInfoInNvidiaDriverPod(ctx, clientset, restConfig, nvidiaPod, targetNodeName)
-			resetMethod := "nvidia-smi drain -r"
-			resetCommand := []string{chrootCmd, nvidiaDriverRoot, "/usr/bin/nvidia-smi", "drain", "-p", targetGPUBusID, "-r"}
-			if isVM {
-				resetMethod = "sysfs remove"
-				busIDForSysfs := strings.ToLower(targetGPUBusID)
-				resetCommand = []string{chrootCmd, nvidiaDriverRoot, "/bin/sh", "-c", fmt.Sprintf("/usr/bin/echo 1 | /usr/bin/tee /sys/bus/pci/devices/%s/remove > /dev/null", busIDForSysfs)}
-			}
-			gpusLog.Info("selected GPU reset method for nvidia-driver-daemonset pod", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID, "targetGPUBusID", targetGPUBusID, "isVM", isVM, "resetMethod", resetMethod)
-
-			stdOut, stdErr, execErr = execCommandInPod(
-				ctx,
-				clientset,
-				restConfig,
-				nvidiaPod.Namespace,
-				nvidiaPod.Name,
-				nvidiaPod.Spec.Containers[0].Name,
-				resetCommand,
-			)
-			if execErr != nil || stdErr != "" {
-				return fmt.Errorf("detach command 'reset GPU' failed: '%v', stderr: '%s', stdout: '%s'", execErr, stdErr, stdOut)
+				return fmt.Errorf("detach command 'set maintenance mode' failed: '%v', stderr: '%s', stdout: '%s'", execErr, stdErr, stdOut)
 			}
 		} else {
-			gpusLog.Info("no nvidia driver found on node, so no need to drain, skip it", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
-			return nil
+			gpusLog.Info("GPU is already in draining status, skip the step", "step", "set maintenance mode", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
+		}
+
+		isVM := isVMByCPUInfoInNvidiaDriverPod(ctx, clientset, restConfig, nvidiaPod, targetNodeName)
+		resetMethod := "nvidia-smi drain -r"
+		resetCommand := []string{chrootCmd, nvidiaDriverRoot, "/usr/bin/nvidia-smi", "drain", "-p", targetGPUBusID, "-r"}
+		if isVM {
+			resetMethod = "sysfs remove"
+			busIDForSysfs := strings.ToLower(targetGPUBusID)
+			resetCommand = []string{chrootCmd, nvidiaDriverRoot, "/bin/sh", "-c", fmt.Sprintf("/usr/bin/echo 1 | /usr/bin/tee /sys/bus/pci/devices/%s/remove > /dev/null", busIDForSysfs)}
+		}
+		gpusLog.Info("selected GPU reset method for nvidia-driver-daemonset pod", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID, "targetGPUBusID", targetGPUBusID, "isVM", isVM, "resetMethod", resetMethod)
+
+		stdOut, stdErr, execErr = execCommandInPod(
+			ctx,
+			clientset,
+			restConfig,
+			nvidiaPod.Namespace,
+			nvidiaPod.Name,
+			nvidiaPod.Spec.Containers[0].Name,
+			resetCommand,
+		)
+		if execErr != nil || stdErr != "" {
+			return fmt.Errorf("detach command 'reset GPU' failed: '%v', stderr: '%s', stdout: '%s'", execErr, stdErr, stdOut)
 		}
 	} else {
 		// OCP + DEVICE_PLUGIN
@@ -875,25 +513,12 @@ done;
 	return nil
 }
 
-func RunNvidiaSmi(ctx context.Context, c client.Client, clientset *kubernetes.Clientset, restConfig *rest.Config, targetNodeName string, driverType GPUDriverType) error {
-
-	switch driverType {
-	case GPUDriverTypeHost:
-		_, err := getGPUInfoFromCroNodeAgentPod(ctx, clientset, restConfig, targetNodeName, "gpu_uuid")
-		if err != nil {
-			return err
-		}
-		gpusLog.Info("Run nvidia-smi successfully in cro-node-agent pod", "target_node_name", targetNodeName)
-	case GPUDriverTypeContainer:
-		_, err := getGPUInfoFromNvidiaPod(ctx, c, clientset, restConfig, targetNodeName, "gpu_uuid")
-		if err != nil {
-			return err
-		}
-		gpusLog.Info("Run nvidia-smi successfully in nvidia-driver-daemonset pod", "target_node_name", targetNodeName)
-	default:
-		return fmt.Errorf("no nvidia driver found on node %s", targetNodeName)
+func RunNvidiaSmi(ctx context.Context, c client.Client, clientset *kubernetes.Clientset, restConfig *rest.Config, targetNodeName string) error {
+	_, err := getGPUInfoFromNvidiaPod(ctx, c, clientset, restConfig, targetNodeName, "gpu_uuid")
+	if err != nil {
+		return err
 	}
-
+	gpusLog.Info("Run nvidia-smi successfully in nvidia-driver-daemonset pod", "target_node_name", targetNodeName)
 	return nil
 }
 
@@ -1162,24 +787,6 @@ func TerminateKubeletPluginPodOnNode(ctx context.Context, clientset *kubernetes.
 	return clientset.CoreV1().Pods(draPod.Namespace).Delete(ctx, draPod.Name, metav1.DeleteOptions{})
 }
 
-func getCroNodeAgentPod(ctx context.Context, clientset *kubernetes.Clientset, targetNodeName string) (*corev1.Pod, error) {
-	pods, err := clientset.CoreV1().Pods("").List(ctx, metav1.ListOptions{
-		LabelSelector: fmt.Sprintf("app=cro-node-agent"),
-		FieldSelector: fmt.Sprintf("spec.nodeName=%s", targetNodeName),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list pods: %v", err)
-	}
-
-	for _, pod := range pods.Items {
-		if strings.HasPrefix(pod.Name, "cro-node-agent") {
-			return &pod, nil
-		}
-	}
-
-	return nil, fmt.Errorf("no Pod named 'cro-node-agent' found on node %s", targetNodeName)
-}
-
 func killNvidiaPersistencedInDriverPod(ctx context.Context, clientset *kubernetes.Clientset, restConfig *rest.Config, pod *corev1.Pod) error {
 	killScript := `
 pid_file="/var/run/nvidia-persistenced/nvidia-persistenced.pid"
@@ -1257,49 +864,6 @@ func getGPUInfoFromNvidiaPod(ctx context.Context, client client.Client, clientse
 	return gpuInfos, nil
 }
 
-func getGPUInfoFromCroNodeAgentPod(ctx context.Context, clientset *kubernetes.Clientset, restConfig *rest.Config, targetNodeName string, queryArgs string) ([]map[string]string, error) {
-	fieldNames := strings.Split(queryArgs, ",")
-
-	draPod, err := getCroNodeAgentPod(ctx, clientset, targetNodeName)
-	if err != nil {
-		return nil, err
-	}
-
-	command := []string{"/bin/chroot", "/host-root", "/usr/bin/nvidia-smi", "--query-gpu=" + queryArgs, "--format=csv,noheader,nounits"}
-	stdOut, stdErr, execErr := execCommandInPod(
-		ctx,
-		clientset,
-		restConfig,
-		draPod.Namespace,
-		draPod.Name,
-		draPod.Spec.Containers[0].Name,
-		command,
-	)
-	if strings.TrimSpace(string(stdOut)) == "No devices were found" {
-		gpusLog.Info("GPU is not found for nvidia-smi command in cro-node-agent pod, it means that there is no GPU on the node, so it returns an empty value.", "targetNodeName", targetNodeName)
-		return []map[string]string{}, nil
-	} else if stdErr != "" || execErr != nil {
-		return nil, fmt.Errorf("get gpu info command failed: err: '%v', stderr: '%s', stdout: '%s'", execErr, stdErr, stdOut)
-	}
-
-	var gpuInfos []map[string]string
-	for _, line := range strings.Split(strings.TrimSpace(string(stdOut)), "\n") {
-		if line == "" {
-			continue
-		}
-
-		parts := strings.Split(line, ",")
-
-		gpuInfo := make(map[string]string)
-		for i, fieldName := range fieldNames {
-			gpuInfo[fieldName] = strings.TrimSpace(parts[i])
-		}
-		gpuInfos = append(gpuInfos, gpuInfo)
-	}
-
-	return gpuInfos, nil
-}
-
 func isVMByCPUInfoInNvidiaDriverPod(ctx context.Context, clientset *kubernetes.Clientset, restConfig *rest.Config, pod *corev1.Pod, targetNodeName string) bool {
 	stdOut, stdErr, execErr := execCommandInPod(
 		ctx,
@@ -1320,18 +884,13 @@ func isVMByCPUInfoInNvidiaDriverPod(ctx context.Context, clientset *kubernetes.C
 	return isVM
 }
 
-func checkGPUDrainStatus(ctx context.Context, clientset *kubernetes.Clientset, restConfig *rest.Config, pod *corev1.Pod, targetNodeName string, targetGPUBusID string, driverType GPUDriverType) (bool, error) {
+func checkGPUDrainStatus(ctx context.Context, clientset *kubernetes.Clientset, restConfig *rest.Config, pod *corev1.Pod, targetNodeName string, targetGPUBusID string) (bool, error) {
 	busID := strings.TrimSpace(targetGPUBusID)
 	if busID == "" {
 		return false, fmt.Errorf("target GPU bus ID is empty")
 	}
 
-	var command []string
-	if driverType == GPUDriverTypeContainer {
-		command = []string{"/usr/bin/nvidia-smi", "drain", "-p", busID, "-q"}
-	} else {
-		command = []string{"/bin/chroot", "/host-root", "/usr/bin/nvidia-smi", "drain", "-p", busID, "-q"}
-	}
+	command := []string{"/usr/bin/nvidia-smi", "drain", "-p", busID, "-q"}
 
 	stdOut, stdErr, execErr := execCommandInPod(
 		ctx,
@@ -1462,141 +1021,4 @@ done
 
 	gpusLog.Info(successMessage, "targetNodeName", targetNodeName, "gpuInfos", gpuInfos)
 	return gpuInfos, nil
-}
-
-func removeNvidiaDriverModule(ctx context.Context, clientset *kubernetes.Clientset, restConfig *rest.Config, pod *corev1.Pod, targetNodeName string, targetGPUUUID string) error {
-	stdOut, stdErr, execErr := execCommandInPod(
-		ctx,
-		clientset,
-		restConfig,
-		pod.Namespace,
-		pod.Name,
-		pod.Spec.Containers[0].Name,
-		[]string{"/bin/chroot", "/host-root", "/usr/sbin/lsmod"},
-	)
-	if stdErr != "" || execErr != nil {
-		return fmt.Errorf("detach command 'lsmod' failed: '%v', stderr: '%s', stdout: '%s'", execErr, stdErr, stdOut)
-	}
-
-	hasNvidiaDRM := false
-	hasNvidiaUVM := false
-	for _, line := range strings.Split(strings.TrimSpace(stdOut), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) == 0 {
-			continue
-		}
-		switch fields[0] {
-		case "nvidia_drm":
-			hasNvidiaDRM = true
-		case "nvidia_uvm":
-			hasNvidiaUVM = true
-		}
-	}
-
-	if hasNvidiaDRM && hasNvidiaUVM {
-		detachCommands := []struct {
-			cmd  []string
-			desc string
-		}{
-			{[]string{"/bin/chroot", "/host-root", "/usr/sbin/modprobe", "-r", "nvidia_drm"}, "remove nvidia_drm module"},
-			{[]string{"/bin/chroot", "/host-root", "/usr/sbin/modprobe", "-r", "nvidia_uvm"}, "remove nvidia_uvm module"},
-		}
-		for _, step := range detachCommands {
-			stdOut, stdErr, execErr := execCommandInPod(
-				ctx,
-				clientset,
-				restConfig,
-				pod.Namespace,
-				pod.Name,
-				pod.Spec.Containers[0].Name,
-				step.cmd,
-			)
-			if execErr != nil || stdErr != "" {
-				return fmt.Errorf("detach command '%s' failed: '%v', stderr: '%s', stdout: '%s'", step.desc, execErr, stdErr, stdOut)
-			}
-		}
-	} else if hasNvidiaDRM && !hasNvidiaUVM {
-		stdOut, stdErr, execErr := execCommandInPod(
-			ctx,
-			clientset,
-			restConfig,
-			pod.Namespace,
-			pod.Name,
-			pod.Spec.Containers[0].Name,
-			[]string{"/bin/chroot", "/host-root", "/usr/sbin/modprobe", "-r", "nvidia_drm"},
-		)
-		if execErr != nil || stdErr != "" {
-			return fmt.Errorf("detach command 'remove nvidia_drm module' failed: '%v', stderr: '%s', stdout: '%s'", execErr, stdErr, stdOut)
-		}
-	} else if !hasNvidiaDRM && hasNvidiaUVM {
-		stdOut, stdErr, execErr := execCommandInPod(
-			ctx,
-			clientset,
-			restConfig,
-			pod.Namespace,
-			pod.Name,
-			pod.Spec.Containers[0].Name,
-			[]string{"/bin/chroot", "/host-root", "/usr/sbin/modprobe", "-r", "nvidia_uvm"},
-		)
-		if execErr != nil || stdErr != "" {
-			return fmt.Errorf("detach command 'remove nvidia_uvm module' failed: '%v', stderr: '%s', stdout: '%s'", execErr, stdErr, stdOut)
-		}
-	} else {
-		gpusLog.Info("skip removing nvidia modules because modules not loaded", "targetNodeName", targetNodeName, "targetGPUUUID", targetGPUUUID)
-	}
-
-	return nil
-}
-
-func checkResetGPUCommandStillRunning(ctx context.Context, clientset *kubernetes.Clientset, restConfig *rest.Config, pod *corev1.Pod, targetNodeName string, busIDForSysfs string) (bool, error) {
-	checkRemoveShell := fmt.Sprintf(`
-# __PROC_SCAN_SELF__
-SELF_MARK="__PROC_SCAN_SELF__"
-TARGET="/sys/bus/pci/devices/%s/remove"
-SCRIPT_PID=$$
-PARENT_PID=$PPID
-
-for PID_DIR in /proc/[0-9]*; do
-  PID=${PID_DIR#/proc/}
-
-  if [ "$PID" = "$SCRIPT_PID" ] || [ "$PID" = "$PARENT_PID" ]; then
-    continue
-  fi
-
-  [ -r "$PID_DIR/cmdline" ] || continue
-
-  CMD_LINE=$( (tr '\0' ' ' < "$PID_DIR/cmdline") 2>/dev/null ) || continue
-  [ -n "$CMD_LINE" ] || continue
-
-  case "$CMD_LINE" in
-    *"$SELF_MARK"*) continue ;;
-  esac
-
-  case "$CMD_LINE" in
-    *"$TARGET"*)
-      echo true
-      exit 0
-      ;;
-  esac
-done
-`, busIDForSysfs)
-	checkRemoveCommand := []string{"/bin/chroot", "/host-root", "/bin/sh", "-c", checkRemoveShell}
-	stdOut, stdErr, execErr := execCommandInPod(
-		ctx,
-		clientset,
-		restConfig,
-		pod.Namespace,
-		pod.Name,
-		pod.Spec.Containers[0].Name,
-		checkRemoveCommand,
-	)
-	if stdErr != "" || execErr != nil {
-		return false, fmt.Errorf("check 'reset GPU' command failed: '%v', stderr: '%s'", execErr, stdErr)
-	}
-
-	if strings.TrimSpace(stdOut) == "true" {
-		return true, nil
-	}
-
-	return false, nil
 }

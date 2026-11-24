@@ -216,9 +216,8 @@ func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context,
 
 	deviceResourceType := os.Getenv("DEVICE_RESOURCE_TYPE")
 
-	driverType, err := utils.DetectGPUDriverType(ctx, r.Client, r.Clientset, r.RestConfig, resource.Spec.TargetNode)
-	if err != nil {
-		return r.requeueOnErr(resource, err, "failed to ensure nvidia driver exists on target node", "TargetNode", resource.Spec.TargetNode, "composableResource", resource.Name)
+	if err := utils.EnsureGPUDriverEnabled(ctx, r.Client); err != nil {
+		return r.requeueOnErr(resource, err, "failed to check ClusterPolicy driver configuration", "TargetNode", resource.Spec.TargetNode, "composableResource", resource.Name)
 	}
 
 	if resource.Status.DeviceID == "" {
@@ -263,23 +262,21 @@ func (r *ComposableResourceReconciler) handleAttachingState(ctx context.Context,
 			}
 		}
 	} else if deviceResourceType == "DRA" {
-		if driverType == utils.GPUDriverTypeContainer {
-			pod, reason, err := utils.FindReadyNvidiaDriverPod(ctx, r.Client, resource.Spec.TargetNode)
-			if err != nil {
-				return r.requeueOnErr(resource, err, "failed to check nvidia driver readiness", "composableResource", resource.Name)
-			}
-			if pod == nil {
-				if resource.Status.Error != reason {
-					resource.Status.Error = reason
-					if err := r.Status().Update(ctx, resource); err != nil {
-						return r.requeueOnErr(resource, err, "failed to update composableResource", "composableResource", resource.Name)
-					}
-				}
-				composableResourceLog.Info("waiting for nvidia driver Pod to become ready", "composableResource", resource.Name, "reason", reason)
-				return r.requeueAfter(10*time.Second, nil)
-			}
+		pod, reason, err := utils.FindReadyNvidiaDriverPod(ctx, r.Client, resource.Spec.TargetNode)
+		if err != nil {
+			return r.requeueOnErr(resource, err, "failed to check nvidia driver readiness", "composableResource", resource.Name)
 		}
-		if err := utils.RunNvidiaSmi(ctx, r.Client, r.Clientset, r.RestConfig, resource.Spec.TargetNode, driverType); err != nil {
+		if pod == nil {
+			if resource.Status.Error != reason {
+				resource.Status.Error = reason
+				if err := r.Status().Update(ctx, resource); err != nil {
+					return r.requeueOnErr(resource, err, "failed to update composableResource", "composableResource", resource.Name)
+				}
+			}
+			composableResourceLog.Info("waiting for nvidia driver Pod to become ready", "composableResource", resource.Name, "reason", reason)
+			return r.requeueAfter(10*time.Second, nil)
+		}
+		if err := utils.RunNvidiaSmi(ctx, r.Client, r.Clientset, r.RestConfig, resource.Spec.TargetNode); err != nil {
 			composableResourceLog.Error(err, "failed to run nvidia-smi", "composableResource", resource.Name)
 			resource.Status.Error = err.Error()
 			if err := r.Status().Update(ctx, resource); err != nil {
