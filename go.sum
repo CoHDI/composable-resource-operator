@@ -123,8 +123,8 @@ github.com/kylelemons/godebug v1.1.0 h1:RPNrshWIDI6G2gRW9EHilWtl7Z6Sb1BR0xunSBf0
 github.com/kylelemons/godebug v1.1.0/go.mod h1:9/0rRGxNHcop5bhtWyNeEfOS8JIWk580+fNqagV/RAw=
 github.com/maruel/natural v1.1.1 h1:Hja7XhhmvEFhcByqDoHz9QZbkWey+COd9xWfCfn1ioo=
 github.com/maruel/natural v1.1.1/go.mod h1:v+Rfd79xlw1AgVBjbO0BEQmptqb5HvL/k9GRHB7ZKEg=
-github.com/metal3-io/baremetal-operator/apis v0.14.1 h1:sRTerUw74/4m65ceFQ4LXMHUUw7EdcyhSFWXA1gNfcY=
-github.com/metal3-io/baremetal-operator/apis v0.14.1/go.mod h1:JqfrsuMUnYLKhdI4CVMIyrurRhygpC73dwtW5GTu7/c=
+github.com/metal3-io/baremetal-operator/apis v0.14.2 h1:aN+/UaJAuzcgUAV5IaLn/VSRN1lQMBAf7xXEujpreoU=
+github.com/metal3-io/baremetal-operator/apis v0.14.2/go.mod h1:ECy5tCjIvrpoi7LlPNrExaopE7QQHNmyTFmNV9xOHcU=
 github.com/metal3-io/cluster-api-provider-metal3/api v1.13.1 h1:DpFXyTq4vabR0zSdiJQ7v8QmPkIcqy9bV5BwZl2m/rA=
 github.com/metal3-io/cluster-api-provider-metal3/api v1.13.1/go.mod h1:y5mIBSJ2nmVcpA8jEkCiKeN7V9Xsbaz8CbPUnIL10pM=
 github.com/metal3-io/ip-address-manager/api v1.13.1 h1:q1UTnEiqDFu714wFMuZb9YX041XgpIf2w2yR6TfHuOY=
