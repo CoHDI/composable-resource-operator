@@ -1,0 +1,74 @@
+name: Dispatch CoHDI CI (result = label on the PR)
+
+on:
+  pull_request_target:
+    types: [labeled, synchronize]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  dispatch:
+    if: github.event.action == 'labeled' && github.event.label.name == 'run-cohdi-ci'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify the labeler is a maintainer
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          ROLE=$(gh api "repos/${{ github.repository }}/collaborators/${{ github.triggering_actor }}/permission" --jq .role_name || true)
+          if [ "$ROLE" = "admin" ] || [ "$ROLE" = "maintain" ]; then
+            echo "OK: ${{ github.triggering_actor }} (role: $ROLE)"
+          else
+            echo "ERROR: ${{ github.triggering_actor }} (role: ${ROLE:-unknown}) — running the CoHDI CI requires the maintain role or higher"
+            echo "Removing the request label."
+            gh api -X DELETE "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/labels/run-cohdi-ci" >/dev/null || true
+            exit 1
+          fi
+
+      - name: Generate GitHub App token for the CI repo
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.COHDI_APP_ID }}
+          private-key: ${{ secrets.COHDI_APP_PRIVATE_KEY }}
+          owner: cohdi
+          repositories: cohdi-ci-mock
+
+      - name: Dispatch the full pipeline
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run cohdi-component-deploy-and-test.yaml \
+            -R cohdi/cohdi-ci-mock \
+            --ref main \
+            -f component="${{ github.event.repository.name }}" \
+            -f pr_number="${{ github.event.pull_request.number }}"
+
+          echo "Dispatched the pipeline for ${{ github.repository }} PR #${{ github.event.pull_request.number }}"
+          echo "NOTE: success of THIS run only means the dispatch succeeded."
+
+      - name: Remove the request label (dispatched)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh api -X DELETE "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/labels/run-cohdi-ci" >/dev/null || true
+          echo "run-cohdi-ci label removed from PR #${{ github.event.pull_request.number }}"
+
+  invalidate-verdict:
+    if: github.event.action == 'synchronize'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Remove the stale success label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh api -X DELETE "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/labels/cohdi-ci-passed" >/dev/null 2>&1; then
+            echo "cohdi-ci-passed removed from PR #${{ github.event.pull_request.number }} (new commits invalidated the verdict)"
+          else
+            echo "PR #${{ github.event.pull_request.number }} had no cohdi-ci-passed label; nothing to do"
+          fi

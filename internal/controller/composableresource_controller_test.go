@@ -28,6 +28,7 @@ import (
 	neturl "net/url"
 	"os"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/agiledragon/gomonkey/v2"
@@ -40,12 +41,15 @@ import (
 	v1alpha3 "k8s.io/api/resource/v1alpha3"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/remotecommand"
 	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	crov1alpha1 "github.com/CoHDI/composable-resource-operator/api/v1alpha1"
@@ -1520,6 +1524,7 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				expectedRequestStatus  *crov1alpha1.ComposableResourceStatus
 				expectedReconcileError string
 				expectedRequestDeleted bool
+				expectedResult         *reconcile.Result
 			}
 
 			BeforeAll(func() {
@@ -1558,7 +1563,13 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 				Expect(callFunction(tc.setErrorMode)).NotTo(HaveOccurred())
 				Expect(callFunction(tc.extraHandling, tc.resourceName)).NotTo(HaveOccurred())
 
-				composableResource, err := triggerComposableResourceReconcile(controllerReconciler, tc.resourceName, false)
+				namespacedName := types.NamespacedName{Name: tc.resourceName}
+				result, err := controllerReconciler.Reconcile(ctx, reconcile.Request{NamespacedName: namespacedName})
+				composableResource := &crov1alpha1.ComposableResource{}
+				Expect(k8sClient.Get(ctx, namespacedName, composableResource)).To(Succeed())
+				if tc.expectedResult != nil {
+					Expect(result).To(Equal(*tc.expectedResult))
+				}
 
 				if tc.expectedReconcileError != "" {
 					Expect(err).To(HaveOccurred())
@@ -2529,7 +2540,8 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 
 					expectedReconcileError: "an error occurred with the resource in CM: 'add failed due to some reasons'",
 				}),
-				Entry("should return an error and remain Attaching when the nvidia-driver-daemonset pod cannot be found", testcase{
+				Entry("should wait without an error and remain Attaching when the nvidia-driver-daemonset pod cannot be found", testcase{
+					expectedResult: &reconcile.Result{RequeueAfter: 10 * time.Second},
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
 					cluster_uuid: "cluster0-uuid-temp-0000-000000000001",
 
@@ -2620,7 +2632,6 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 						composableResourceStatus.CDIDeviceID = "GPU-device00-uuid-temp-0000-000000000res"
 						return composableResourceStatus
 					}(),
-					expectedReconcileError: "nvidia-driver-daemonset pod is not found on node worker-0",
 				}),
 				Entry("should wait when dra-driver-nvidia-gpu-kubelet-plugin Daemonset can not be found in cluster", testcase{
 					tenant_uuid:  "tenant00-uuid-temp-0000-000000000000",
@@ -9736,13 +9747,13 @@ var _ = Describe("ComposableResource Controller", Ordered, func() {
 	})
 })
 
-var _ = Describe("nvidiaGpuOperatorNamespace", func() {
+var _ = Describe("utils.NvidiaGpuOperatorNamespace", func() {
 	It("returns the default 'gpu-operator' when the env var is unset", func() {
 		original := os.Getenv("NVIDIA_GPU_OPERATOR_NAMESPACE")
 		os.Unsetenv("NVIDIA_GPU_OPERATOR_NAMESPACE")
 		defer os.Setenv("NVIDIA_GPU_OPERATOR_NAMESPACE", original)
 
-		Expect(nvidiaGpuOperatorNamespace()).To(Equal("gpu-operator"))
+		Expect(utils.NvidiaGpuOperatorNamespace()).To(Equal("gpu-operator"))
 	})
 
 	It("returns the env var value when NVIDIA_GPU_OPERATOR_NAMESPACE is set", func() {
@@ -9750,7 +9761,7 @@ var _ = Describe("nvidiaGpuOperatorNamespace", func() {
 		os.Setenv("NVIDIA_GPU_OPERATOR_NAMESPACE", "custom-ns")
 		defer os.Setenv("NVIDIA_GPU_OPERATOR_NAMESPACE", original)
 
-		Expect(nvidiaGpuOperatorNamespace()).To(Equal("custom-ns"))
+		Expect(utils.NvidiaGpuOperatorNamespace()).To(Equal("custom-ns"))
 	})
 
 	It("returns the default when the env var is set to empty string", func() {
@@ -9758,6 +9769,146 @@ var _ = Describe("nvidiaGpuOperatorNamespace", func() {
 		os.Setenv("NVIDIA_GPU_OPERATOR_NAMESPACE", "")
 		defer os.Setenv("NVIDIA_GPU_OPERATOR_NAMESPACE", original)
 
-		Expect(nvidiaGpuOperatorNamespace()).To(Equal("gpu-operator"))
+		Expect(utils.NvidiaGpuOperatorNamespace()).To(Equal("gpu-operator"))
 	})
 })
+
+func TestHandleAttachingStateDriverReadiness(t *testing.T) {
+	listErr := errors.New("pod list unavailable")
+	statusErr := errors.New("status update failed")
+	searchErr := fmt.Errorf("failed to list pods: %w", listErr)
+	type testCase struct {
+		name          string
+		podExists     bool
+		phase         corev1.PodPhase
+		ready         corev1.ConditionStatus
+		listFails     bool
+		statusFails   bool
+		initialError  string
+		wantError     string
+		wantReturnErr error
+		wantUpdates   int
+		wantOnline    bool
+	}
+	cases := []testCase{
+		{name: "1 API error is saved", listFails: true, initialError: "previous error", wantError: searchErr.Error(), wantReturnErr: searchErr, wantUpdates: 1},
+		{name: "2 API error with failed status update", listFails: true, statusFails: true, initialError: "previous error", wantError: "previous error", wantReturnErr: searchErr, wantUpdates: 1},
+		{name: "3 ready pod continues to Online", podExists: true, phase: corev1.PodRunning, ready: corev1.ConditionTrue, initialError: "previous error", wantUpdates: 1, wantOnline: true},
+	}
+	for _, state := range []struct {
+		name      string
+		podExists bool
+		phase     corev1.PodPhase
+		ready     corev1.ConditionStatus
+	}{
+		{name: "not found"},
+		{name: "not running", podExists: true, phase: corev1.PodPending, ready: corev1.ConditionTrue},
+		{name: "not ready", podExists: true, phase: corev1.PodRunning, ready: corev1.ConditionFalse},
+	} {
+		reason := fmt.Sprintf("nvidia-driver-daemonset pod is %s on node worker-1", state.name)
+		cases = append(cases,
+			testCase{name: "4 reason already saved/" + state.name, podExists: state.podExists, phase: state.phase, ready: state.ready, initialError: reason, wantError: reason},
+			testCase{name: "5 new reason is saved/" + state.name, podExists: state.podExists, phase: state.phase, ready: state.ready, initialError: "previous error", wantError: reason, wantUpdates: 1},
+			testCase{name: "6 reason update fails/" + state.name, podExists: state.podExists, phase: state.phase, ready: state.ready, statusFails: true, initialError: "previous error", wantError: "previous error", wantReturnErr: statusErr, wantUpdates: 2},
+		)
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			g := NewWithT(t)
+			t.Setenv("DEVICE_RESOURCE_TYPE", "DRA")
+			t.Setenv("NVIDIA_GPU_OPERATOR_NAMESPACE", "gpu-operator")
+			testCtx := context.Background()
+			testScheme := runtime.NewScheme()
+			g.Expect(corev1.AddToScheme(testScheme)).To(Succeed())
+			g.Expect(crov1alpha1.AddToScheme(testScheme)).To(Succeed())
+			resource := &crov1alpha1.ComposableResource{
+				ObjectMeta: metav1.ObjectMeta{Name: "driver-readiness-test"},
+				Spec:       crov1alpha1.ComposableResourceSpec{TargetNode: "worker-1"},
+				Status: crov1alpha1.ComposableResourceStatus{
+					State: "Attaching", DeviceID: "gpu-uuid", Error: tc.initialError,
+				},
+			}
+			updates := 0
+			builder := fake.NewClientBuilder().WithScheme(testScheme).
+				WithStatusSubresource(resource).WithObjects(resource).
+				WithInterceptorFuncs(interceptor.Funcs{
+					List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+						if tc.listFails {
+							return listErr
+						}
+						return c.List(ctx, list, opts...)
+					},
+					SubResourceUpdate: func(ctx context.Context, c client.Client, subResource string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+						g.Expect(subResource).To(Equal("status"))
+						updates++
+						if tc.statusFails {
+							return statusErr
+						}
+						return c.SubResource(subResource).Update(ctx, obj, opts...)
+					},
+				})
+			if tc.podExists {
+				builder.WithObjects(&corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "nvidia-driver-pod", Namespace: "gpu-operator",
+						Labels: map[string]string{"app.kubernetes.io/component": "nvidia-driver"},
+					},
+					Spec: corev1.PodSpec{NodeName: "worker-1"},
+					Status: corev1.PodStatus{
+						Phase:      tc.phase,
+						Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: tc.ready}},
+					},
+				})
+			}
+			c := builder.Build()
+			g.Expect(c.Get(testCtx, client.ObjectKeyFromObject(resource), resource)).To(Succeed())
+			patches := gomonkey.NewPatches()
+			defer patches.Reset()
+			patches.ApplyFuncReturn(utils.DetectGPUDriverType, utils.GPUDriverTypeContainer, nil)
+			var subsequentCalls []string
+			patches.ApplyFunc(utils.RunNvidiaSmi, func(context.Context, client.Client, *kubernetes.Clientset, *rest.Config, string, utils.GPUDriverType) error {
+				subsequentCalls = append(subsequentCalls, "RunNvidiaSmi")
+				return nil
+			})
+			patches.ApplyFunc(utils.TerminateKubeletPluginPodOnNode, func(context.Context, *kubernetes.Clientset, string) error {
+				subsequentCalls = append(subsequentCalls, "TerminateKubeletPluginPodOnNode")
+				return nil
+			})
+			patches.ApplyFunc(utils.CheckGPUVisible, func(context.Context, client.Client, *kubernetes.Clientset, *rest.Config, string, *crov1alpha1.ComposableResource) (bool, error) {
+				subsequentCalls = append(subsequentCalls, "CheckGPUVisible")
+				return true, nil
+			})
+
+			r := &ComposableResourceReconciler{Client: c, Scheme: testScheme}
+			result, err := r.handleAttachingState(testCtx, resource, nil)
+
+			if tc.wantReturnErr != nil {
+				g.Expect(err).To(MatchError(tc.wantReturnErr.Error()))
+				if tc.listFails {
+					g.Expect(errors.Is(err, listErr)).To(BeTrue())
+				} else {
+					g.Expect(err).To(BeIdenticalTo(statusErr))
+				}
+			} else {
+				g.Expect(err).NotTo(HaveOccurred())
+			}
+			wantResult := reconcile.Result{}
+			if !tc.wantOnline && tc.wantReturnErr == nil {
+				wantResult.RequeueAfter = 10 * time.Second
+			}
+			g.Expect(result).To(Equal(wantResult))
+			g.Expect(updates).To(Equal(tc.wantUpdates))
+			saved := &crov1alpha1.ComposableResource{}
+			g.Expect(c.Get(testCtx, client.ObjectKeyFromObject(resource), saved)).To(Succeed())
+			g.Expect(saved.Status.Error).To(Equal(tc.wantError))
+			if tc.wantOnline {
+				g.Expect(saved.Status.State).To(Equal("Online"))
+				g.Expect(subsequentCalls).To(Equal([]string{"RunNvidiaSmi", "TerminateKubeletPluginPodOnNode", "CheckGPUVisible"}))
+			} else {
+				g.Expect(saved.Status.State).To(Equal("Attaching"))
+				g.Expect(subsequentCalls).To(BeEmpty())
+			}
+		})
+	}
+}
